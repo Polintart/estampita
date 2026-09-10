@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <title>Mi Primera Comunión · WebAR</title>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+    }
+  }
+  </script>
+
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main id="app">
+    <div id="ar-container"></div>
+
+    <section id="start-screen" class="screen">
+      <div class="card">
+        <div class="sparkle">✦</div>
+        <h1>Mi primera Comunión</h1>
+        <p>Una pequeña sorpresa te espera en la estampita.</p>
+        <button id="start-button">Comenzar</button>
+        <small>Se abrirá la cámara y no hace falta instalar ninguna app.</small>
+      </div>
+    </section>
+
+    <div id="status" class="status hidden">Apuntá la cámara a la estampita</div>
+    <button id="stop-button" class="stop hidden" aria-label="Cerrar cámara">×</button>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
