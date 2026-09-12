@@ -7,6 +7,7 @@ const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
+let hairLayer = null;
 
 async function startAR() {
   startButton.disabled = true;
@@ -172,6 +173,9 @@ async function startAR() {
       mesh.position.copy(commonPosition);
       mesh.renderOrder = layer.order;
 
+      if (layer.file === "nena-pelo.png") {
+  hairLayer = mesh;
+}
       anchor.group.add(mesh);
     }
 
@@ -197,9 +201,21 @@ async function startAR() {
     status.textContent =
       "Apuntá la cámara a la estampita";
 
-    renderer.setAnimationLoop(() => {
-      renderer.render(scene, camera);
-    });
+    const clock = new THREE.Clock();
+
+renderer.setAnimationLoop(() => {
+  const time = clock.getElapsedTime();
+
+  if (hairLayer) {
+    hairLayer.position.x =
+      commonPosition.x + Math.sin(time * 1.2) * 0.004;
+
+    hairLayer.position.y =
+      commonPosition.y + Math.sin(time * 1.5) * 0.002;
+  }
+
+  renderer.render(scene, camera);
+});
 
   } catch (error) {
     console.error(
