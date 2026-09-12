@@ -7,7 +7,6 @@ const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
-let hairLayer = null;
 
 async function startAR() {
   startButton.disabled = true;
@@ -23,11 +22,7 @@ async function startAR() {
       uiError: "no"
     });
 
-    const {
-      renderer,
-      scene,
-      camera
-    } = mindarThree;
+    const { renderer, scene, camera } = mindarThree;
 
     renderer.setPixelRatio(
       Math.min(window.devicePixelRatio, 2)
@@ -39,53 +34,139 @@ async function startAR() {
 
     const textureLoader = new THREE.TextureLoader();
 
-    const hairTexture = await textureLoader.loadAsync(
-      "./assets/animation/nena-pelo.png"
+    /*
+     * Todas las imágenes fueron exportadas desde el mismo
+     * lienzo de 1024 × 1536 px.
+     *
+     * Por eso usamos un único plano de 1 × 1.5
+     * para conservar exactamente la proporción.
+     */
+
+    const layers = [
+      {
+        file: "texto-jesus.png",
+        name: "Texto Jesús",
+        order: 1
+      },
+      {
+        file: "texto-comunion.png",
+        name: "Texto Comunión",
+        order: 2
+      },
+      {
+        file: "pincelada-lila.png",
+        name: "Pincelada lila",
+        order: 3
+      },
+      {
+        file: "corazon-inferior.png",
+        name: "Corazón inferior",
+        order: 4
+      },
+      {
+        file: "corazon-superior.png",
+        name: "Corazón superior",
+        order: 5
+      },
+      {
+        file: "cruz.png",
+        name: "Cruz",
+        order: 6
+      },
+      {
+        file: "nena-cuerpo.png",
+        name: "Nena cuerpo",
+        order: 10
+      },
+      {
+        file: "nena-flores.png",
+        name: "Nena flores",
+        order: 11
+      },
+      {
+        file: "nena-cara.png",
+        name: "Nena cara",
+        order: 12
+      },
+      {
+        file: "nena-pelo.png",
+        name: "Nena pelo",
+        order: 13
+      },
+      {
+        file: "nena-corona.png",
+        name: "Nena corona",
+        order: 14
+      },
+      {
+        file: "gatito-superior.png",
+        name: "Gatito superior",
+        order: 20
+      },
+      {
+        file: "gatito inferior.png",
+        name: "Gatito inferior",
+        order: 21
+      },
+      {
+        file: "corazones.png",
+        name: "Corazones",
+        order: 30
+      },
+      {
+        file: "estrellas.png",
+        name: "Estrellas",
+        order: 31
+      },
+      {
+        file: "destellos.png",
+        name: "Destellos",
+        order: 32
+      },
+      {
+        file: "marco-corazones.png",
+        name: "Marco corazones",
+        order: 40
+      }
+    ];
+
+    /*
+     * Todas las capas se desplazan la misma cantidad.
+     *
+     * -0.02 es el valor que ya comprobamos con pelo y cara.
+     */
+
+    const commonPosition = new THREE.Vector3(
+      -0.02,
+      0,
+      0.02
     );
 
-    const faceTexture = await textureLoader.loadAsync(
-  "./assets/animation/nena-cara.png"
-);
+    for (const layer of layers) {
+      const texture = await textureLoader.loadAsync(
+        `./assets/animation/${layer.file}`
+      );
 
-    hairTexture.colorSpace = THREE.SRGBColorSpace;
+      texture.colorSpace = THREE.SRGBColorSpace;
 
-    faceTexture.colorSpace = THREE.SRGBColorSpace;
+      const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        alphaTest: 0.01,
+        depthTest: false,
+        depthWrite: false
+      });
 
-    const hairMaterial = new THREE.MeshBasicMaterial({
-      map: hairTexture,
-      transparent: true,
-      alphaTest: 0.01,
-      depthTest: false,
-      depthWrite: false
-    });
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1.5),
+        material
+      );
 
-    hairLayer = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
-      hairMaterial
-    );
+      mesh.position.copy(commonPosition);
+      mesh.renderOrder = layer.order;
 
-    const faceMaterial = new THREE.MeshBasicMaterial({
-  map: faceTexture,
-  transparent: true,
-  alphaTest: 0.01,
-  depthTest: false,
-  depthWrite: false
-});
-
-const faceLayer = new THREE.Mesh(
-  new THREE.PlaneGeometry(1, 1.5),
-  faceMaterial
-);
-
-faceLayer.position.set(-0.02, 0, 0.025);
-faceLayer.renderOrder = 11;
-
-anchor.group.add(faceLayer);
-
-    hairLayer.position.set(-0.02, 0, 0.02);
-    hairLayer.renderOrder = 10;
-
-    anchor.group.add(hairLayer);
+      anchor.group.add(mesh);
+    }
 
     anchor.onTargetFound = () => {
       status.textContent = "¡La estampita cobró vida!";
@@ -93,7 +174,8 @@ anchor.group.add(faceLayer);
     };
 
     anchor.onTargetLost = () => {
-      status.textContent = "Apuntá la cámara a la estampita";
+      status.textContent =
+        "Apuntá la cámara a la estampita";
       status.classList.remove("hidden");
     };
 
@@ -105,14 +187,18 @@ anchor.group.add(faceLayer);
     startScreen.classList.add("hidden");
     stopButton.classList.remove("hidden");
 
-    status.textContent = "Apuntá la cámara a la estampita";
+    status.textContent =
+      "Apuntá la cámara a la estampita";
 
     renderer.setAnimationLoop(() => {
       renderer.render(scene, camera);
     });
 
   } catch (error) {
-    console.error("Error iniciando MindAR:", error);
+    console.error(
+      "Error iniciando MindAR:",
+      error
+    );
 
     if (mindarThree) {
       try {
@@ -124,7 +210,8 @@ anchor.group.add(faceLayer);
     mindarThree = null;
 
     startButton.disabled = false;
-    startButton.textContent = "Intentar nuevamente";
+    startButton.textContent =
+      "Intentar nuevamente";
 
     status.textContent =
       "No se pudo iniciar la cámara.";
@@ -155,6 +242,12 @@ function stopAR() {
   mindarThree = null;
 }
 
-startButton.addEventListener("click", startAR);
+startButton.addEventListener(
+  "click",
+  startAR
+);
 
-stopButton.addEventListener("click", stopAR);
+stopButton.addEventListener(
+  "click",
+  stopAR
+);
