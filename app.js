@@ -218,10 +218,7 @@ async function startAR() {
 
     status.classList.remove("hidden");
 
-    alert(
-      "No se pudo iniciar la cámara. " +
-      "Verificá el permiso de cámara de Safari."
-    );
+    alert("ERROR REAL: " + error.message);
   }
 }
 
