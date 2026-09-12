@@ -49,13 +49,13 @@ async function startAR() {
         order: 1
       },
       {
-        file: "texto-comunion.png",
-        name: "Texto Comunión",
+        file: "pincelada-lila.png",
+        name: "Pincelada lila",
         order: 2
       },
       {
-        file: "pincelada-lila.png",
-        name: "Pincelada lila",
+        file: "texto-comunion.png",
+        name: "Texto Comunión",
         order: 3
       },
       {
