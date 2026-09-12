@@ -43,7 +43,13 @@ async function startAR() {
       "./assets/animation/nena-pelo.png"
     );
 
+    const faceTexture = await textureLoader.loadAsync(
+  "./assets/animation/nena-cara.png"
+);
+
     hairTexture.colorSpace = THREE.SRGBColorSpace;
+
+    faceTexture.colorSpace = THREE.SRGBColorSpace;
 
     const hairMaterial = new THREE.MeshBasicMaterial({
       map: hairTexture,
@@ -57,6 +63,24 @@ async function startAR() {
       new THREE.PlaneGeometry(1, 1.5),
       hairMaterial
     );
+
+    const faceMaterial = new THREE.MeshBasicMaterial({
+  map: faceTexture,
+  transparent: true,
+  alphaTest: 0.01,
+  depthTest: false,
+  depthWrite: false
+});
+
+const faceLayer = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1.5),
+  faceMaterial
+);
+
+faceLayer.position.set(-0.02, 0, 0.025);
+faceLayer.renderOrder = 11;
+
+anchor.group.add(faceLayer);
 
     hairLayer.position.set(-0.02, 0, 0.02);
     hairLayer.renderOrder = 10;
