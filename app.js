@@ -7,79 +7,7 @@ const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
-let pulse = null;
-let sparkleGroup = null;
-const clock = new THREE.Clock();
-
-function makeSparkle(color = 0xf1c9df) {
-  const group = new THREE.Group();
-
-  const material = new THREE.MeshBasicMaterial({
-    color: color,
-    transparent: true,
-    opacity: 0.85
-  });
-
-  const vertical = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.035, 0.18),
-    material
-  );
-
-  const horizontal = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.18, 0.035),
-    material
-  );
-
-  group.add(vertical);
-  group.add(horizontal);
-
-  return group;
-}
-
-function buildProofEffect() {
-  const group = new THREE.Group();
-
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xe7b8d4,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide
-  });
-
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.075, 0.092, 48),
-    ringMaterial
-  );
-
-  ring.position.set(0, 0.38, 0.02);
-
-  pulse = ring;
-  group.add(ring);
-
-  sparkleGroup = new THREE.Group();
-
-  const positions = [
-    [-0.22, 0.48],
-    [0.22, 0.48],
-    [-0.28, 0.22],
-    [0.28, 0.22]
-  ];
-
-  positions.forEach(([x, y], i) => {
-    const sparkle = makeSparkle(
-      i % 2 ? 0xe9d49b : 0xdcb8e7
-    );
-
-    sparkle.position.set(x, y, 0.025);
-    sparkle.scale.setScalar(0.7 + i * 0.08);
-
-    sparkleGroup.add(sparkle);
-  });
-
-  group.add(sparkleGroup);
-
-  return group;
-}
+let hairLayer = null;
 
 async function startAR() {
   startButton.disabled = true;
@@ -109,7 +37,31 @@ async function startAR() {
 
     const anchor = mindarThree.addAnchor(0);
 
-    anchor.group.add(buildProofEffect());
+    const textureLoader = new THREE.TextureLoader();
+
+    const hairTexture = await textureLoader.loadAsync(
+      "./assets/animation/nena-pelo.png"
+    );
+
+    hairTexture.colorSpace = THREE.SRGBColorSpace;
+
+    const hairMaterial = new THREE.MeshBasicMaterial({
+      map: hairTexture,
+      transparent: true,
+      alphaTest: 0.01,
+      depthTest: false,
+      depthWrite: false
+    });
+
+    hairLayer = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1.5),
+      hairMaterial
+    );
+
+    hairLayer.position.set(0, 0, 0.02);
+    hairLayer.renderOrder = 10;
+
+    anchor.group.add(hairLayer);
 
     anchor.onTargetFound = () => {
       status.textContent = "¡La estampita cobró vida!";
@@ -132,32 +84,6 @@ async function startAR() {
     status.textContent = "Apuntá la cámara a la estampita";
 
     renderer.setAnimationLoop(() => {
-      const time = clock.getElapsedTime();
-
-      if (pulse) {
-        const wave = (Math.sin(time * 3) + 1) / 2;
-
-        pulse.material.opacity =
-          0.18 + wave * 0.55;
-
-        pulse.scale.setScalar(
-          0.85 + wave * 0.35
-        );
-      }
-
-      if (sparkleGroup) {
-        sparkleGroup.children.forEach((sparkle, i) => {
-          const phase = time * 2 + i * 1.4;
-          const alpha = (Math.sin(phase) + 1) / 2;
-
-          sparkle.material.opacity =
-            0.15 + alpha * 0.8;
-
-          sparkle.rotation.z =
-            Math.sin(phase) * 0.18;
-        });
-      }
-
       renderer.render(scene, camera);
     });
 
