@@ -58,7 +58,7 @@ async function startAR() {
       hairMaterial
     );
 
-    hairLayer.position.set(0, 0, 0.02);
+    hairLayer.position.set(0.15, 0, 0.02);
     hairLayer.renderOrder = 10;
 
     anchor.group.add(hairLayer);
