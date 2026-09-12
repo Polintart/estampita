@@ -104,7 +104,7 @@ async function startAR() {
         order: 20
       },
       {
-        file: "gatito inferior.png",
+        file: "gatito-inferior.png",
         name: "Gatito inferior",
         order: 21
       },
