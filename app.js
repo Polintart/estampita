@@ -218,7 +218,7 @@ async function startAR() {
 
     status.classList.remove("hidden");
 
-    alert("ERROR REAL: " + error.message);
+    alert("ERROR REAL: " + JSON.stringify(error));
   }
 }
 
