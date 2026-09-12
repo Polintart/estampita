@@ -143,9 +143,16 @@ async function startAR() {
     );
 
     for (const layer of layers) {
-      const texture = await textureLoader.loadAsync(
-        `./assets/animation/${layer.file}`
-      );
+  let texture;
+
+  try {
+    texture = await textureLoader.loadAsync(
+      `./assets/animation/${layer.file}`
+    );
+  } catch (error) {
+    alert("NO SE PUDO CARGAR: " + layer.file);
+    throw error;
+  }
 
       texture.colorSpace = THREE.SRGBColorSpace;
 
