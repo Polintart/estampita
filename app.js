@@ -34,108 +34,110 @@ function easeOutCubic(value) {
 
 function createSweepGlow(texture, position, renderOrder) {
 
-  const geometry = new THREE.PlaneGeometry(1, 1.5);
+  const geometry =
+    new THREE.PlaneGeometry(1, 1.5);
 
-  const material = new THREE.ShaderMaterial({
+  const material =
+    new THREE.ShaderMaterial({
 
-    uniforms: {
-      map: {
-        value: texture
-      },
+      uniforms: {
 
-      progress: {
-        value: -10
-      },
+        map: {
+          value: texture
+        },
 
-      width: {
-        value: 0.10
-      },
+        progress: {
+          value: -10
+        },
 
-      strength: {
-        value: 1.0
-      }
-    },
+        width: {
+          value: 0.10
+        },
 
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-
-        vUv = uv;
-
-        gl_Position =
-          projectionMatrix *
-          modelViewMatrix *
-          vec4(position, 1.0);
-      }
-    `,
-
-    fragmentShader: `
-      uniform sampler2D map;
-      uniform float progress;
-      uniform float width;
-      uniform float strength;
-
-      varying vec2 vUv;
-
-      void main() {
-
-        vec4 tex = texture2D(map, vUv);
-
-        if (tex.a < 0.01) {
-          discard;
+        strength: {
+          value: 1.0
         }
+      },
 
-        /*
-         * Diagonal suave.
-         * Esto hace que el brillo atraviese
-         * las letras en diagonal.
-         */
-        float position =
-          vUv.x * 0.90 +
-          vUv.y * 0.20;
+      vertexShader: `
+        varying vec2 vUv;
 
-        float distanceFromGlow =
-          abs(position - progress);
+        void main() {
 
-        float glow =
-          1.0 -
-          smoothstep(
-            0.0,
-            width,
-            distanceFromGlow
-          );
+          vUv = uv;
 
-        glow *= strength;
+          gl_Position =
+            projectionMatrix *
+            modelViewMatrix *
+            vec4(position, 1.0);
+        }
+      `,
 
-        /*
-         * El brillo es blanco.
-         * Usamos solamente el alpha
-         * de la textura original.
-         */
-        gl_FragColor =
-          vec4(
-            vec3(1.0),
-            tex.a * glow
-          );
+      fragmentShader: `
+        uniform sampler2D map;
+        uniform float progress;
+        uniform float width;
+        uniform float strength;
 
-        #include <colorspace_fragment>
-      }
-    `,
+        varying vec2 vUv;
 
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
-  });
+        void main() {
 
-  const mesh = new THREE.Mesh(
-    geometry,
-    material
+          vec4 tex = texture2D(map, vUv);
+
+          if (tex.a < 0.01) {
+            discard;
+          }
+
+          float position =
+            vUv.x * 0.90 +
+            vUv.y * 0.20;
+
+          float distanceFromGlow =
+            abs(position - progress);
+
+          float glow =
+            1.0 -
+            smoothstep(
+              0.0,
+              width,
+              distanceFromGlow
+            );
+
+          glow *= strength;
+
+          gl_FragColor =
+            vec4(
+              vec3(1.0),
+              tex.a * glow
+            );
+
+          #include <colorspace_fragment>
+        }
+      `,
+
+      transparent: true,
+
+      depthTest: false,
+
+      depthWrite: false,
+
+      blending:
+        THREE.AdditiveBlending
+    });
+
+  const mesh =
+    new THREE.Mesh(
+      geometry,
+      material
+    );
+
+  mesh.position.copy(
+    position
   );
 
-  mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
@@ -145,7 +147,11 @@ function createSweepGlow(texture, position, renderOrder) {
    BRILLO PULSANTE
 ========================================================= */
 
-function createPulseGlow(texture, position, renderOrder) {
+function createPulseGlow(
+  texture,
+  position,
+  renderOrder
+) {
 
   const geometry =
     new THREE.PlaneGeometry(1, 1.5);
@@ -163,7 +169,8 @@ function createPulseGlow(texture, position, renderOrder) {
 
       depthWrite: false,
 
-      blending: THREE.AdditiveBlending
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
@@ -172,7 +179,9 @@ function createPulseGlow(texture, position, renderOrder) {
       material
     );
 
-  mesh.position.copy(position);
+  mesh.position.copy(
+    position
+  );
 
   mesh.renderOrder =
     renderOrder;
@@ -185,10 +194,18 @@ function createPulseGlow(texture, position, renderOrder) {
    LATIDO DOBLE
 ========================================================= */
 
-function doubleBeat(time, period = 4.2, phase = 0) {
+function doubleBeat(
+  time,
+  period = 4.2,
+  phase = 0
+) {
 
   let t =
-    ((time + phase) % period + period) % period;
+    (
+      (time + phase) %
+      period +
+      period
+    ) % period;
 
   const beat1 =
     Math.exp(
@@ -219,6 +236,7 @@ function doubleBeat(time, period = 4.2, phase = 0) {
 async function startAR() {
 
   startButton.disabled = true;
+
   startButton.textContent =
     "Abriendo cámara…";
 
@@ -228,7 +246,9 @@ async function startAR() {
       new MindARThree({
 
         container:
-          document.querySelector("#ar-container"),
+          document.querySelector(
+            "#ar-container"
+          ),
 
         imageTargetSrc:
           "./targets/estampita.mind",
@@ -236,19 +256,23 @@ async function startAR() {
         maxTrack: 1,
 
         /*
-         * FILTRO MÁS FUERTE
+         * FILTRO DE MINDAR
          *
-         * La prioridad ahora es que
-         * la estampita deje de temblar.
+         * Lo dejamos estable sin llevarlo
+         * a valores extremos.
          */
-        filterMinCF: 0.0003,
-        filterBeta: 700,
+        filterMinCF: 0.0005,
 
-        warmupTolerance: 7,
-        missTolerance: 10,
+        filterBeta: 1000,
+
+        warmupTolerance: 5,
+
+        missTolerance: 8,
 
         uiLoading: "no",
+
         uiScanning: "no",
+
         uiError: "no"
       });
 
@@ -267,12 +291,43 @@ async function startAR() {
       )
     );
 
+
     renderer.outputColorSpace =
       THREE.SRGBColorSpace;
 
 
+    /*
+     * =====================================================
+     * GRUPO DE TRACKING
+     * =====================================================
+     *
+     * MindAR mueve anchor.group.
+     *
+     * Nosotros NO ponemos la estampita ahí.
+     *
+     * anchor.group queda como referencia
+     * del tracking.
+     */
+
     const anchor =
       mindarThree.addAnchor(0);
+
+
+    /*
+     * Grupo real de la estampita.
+     *
+     * Este grupo recibe la posición suavizada.
+     */
+
+    const stabilizedGroup =
+      new THREE.Group();
+
+    scene.add(
+      stabilizedGroup
+    );
+
+    stabilizedGroup.visible =
+      false;
 
 
     const textureLoader =
@@ -287,109 +342,91 @@ async function startAR() {
 
       {
         file: "fondo-limpio.png",
-        name: "Fondo limpio",
         order: 0
       },
 
       {
         file: "texto-jesus.png",
-        name: "Texto Jesús",
         order: 1
       },
 
       {
         file: "pincelada-lila.png",
-        name: "Pincelada lila",
         order: 2
       },
 
       {
         file: "texto-comunion.png",
-        name: "Texto Comunión",
         order: 3
       },
 
       {
         file: "corazon-inferior.png",
-        name: "Corazón inferior",
         order: 4
       },
 
       {
         file: "corazon-superior.png",
-        name: "Corazón superior",
         order: 5
       },
 
       {
         file: "cruz.png",
-        name: "Cruz",
         order: 6
       },
 
       {
         file: "nena-cuerpo.png",
-        name: "Nena cuerpo",
         order: 10
       },
 
       {
         file: "nena-flores.png",
-        name: "Nena flores",
         order: 11
       },
 
       {
         file: "nena-cara.png",
-        name: "Nena cara",
         order: 12
       },
 
       {
         file: "nena-pelo.png",
-        name: "Nena pelo",
         order: 13
       },
 
       {
         file: "nena-corona.png",
-        name: "Nena corona",
         order: 14
       },
 
       {
         file: "gatito-superior.png",
-        name: "Gatito superior",
         order: 20
       },
 
       {
         file: "gatito-inferior.png",
-        name: "Gatito inferior",
         order: 21
       },
 
       {
         file: "corazones.png",
-        name: "Corazones decorativos",
         order: 30
       },
 
       {
         file: "estrellas.png",
-        name: "Estrellas",
         order: 31
       },
 
       {
         file: "destellos.png",
-        name: "Destellos",
         order: 32
       },
 
       {
         file: "marco-corazones.png",
-        name: "Marco corazones",
         order: 40
       }
     ];
@@ -458,28 +495,42 @@ async function startAR() {
         commonPosition
       );
 
+
       mesh.renderOrder =
         layer.order;
 
 
-      layerMeshes[layer.file] =
-        mesh;
+      layerMeshes[
+        layer.file
+      ] = mesh;
 
 
-      anchor.group.add(mesh);
+      /*
+       * MUY IMPORTANTE:
+       *
+       * Las capas van al grupo
+       * estabilizado, NO al anchor.group.
+       */
+
+      stabilizedGroup.add(
+        mesh
+      );
     }
 
 
     /* =====================================================
-       BRILLOS
+       CREAR BRILLOS
     ===================================================== */
 
     /*
-     * TEXTOS
+     * TEXTO JESÚS
      */
 
-    glowMeshes["texto-jesus.png"] =
+    glowMeshes[
+      "texto-jesus.png"
+    ] =
       createSweepGlow(
+
         layerMeshes[
           "texto-jesus.png"
         ].material.map,
@@ -489,13 +540,23 @@ async function startAR() {
         1.5
       );
 
-    anchor.group.add(
-      glowMeshes["texto-jesus.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "texto-jesus.png"
+      ]
     );
 
 
-    glowMeshes["texto-comunion.png"] =
+    /*
+     * TEXTO COMUNIÓN
+     */
+
+    glowMeshes[
+      "texto-comunion.png"
+    ] =
       createSweepGlow(
+
         layerMeshes[
           "texto-comunion.png"
         ].material.map,
@@ -505,8 +566,11 @@ async function startAR() {
         3.5
       );
 
-    anchor.group.add(
-      glowMeshes["texto-comunion.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "texto-comunion.png"
+      ]
     );
 
 
@@ -514,8 +578,11 @@ async function startAR() {
      * CRUZ
      */
 
-    glowMeshes["cruz.png"] =
+    glowMeshes[
+      "cruz.png"
+    ] =
       createPulseGlow(
+
         layerMeshes[
           "cruz.png"
         ].material.map,
@@ -525,8 +592,11 @@ async function startAR() {
         6.5
       );
 
-    anchor.group.add(
-      glowMeshes["cruz.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "cruz.png"
+      ]
     );
 
 
@@ -534,8 +604,11 @@ async function startAR() {
      * CORAZÓN SUPERIOR
      */
 
-    glowMeshes["corazon-superior.png"] =
+    glowMeshes[
+      "corazon-superior.png"
+    ] =
       createPulseGlow(
+
         layerMeshes[
           "corazon-superior.png"
         ].material.map,
@@ -545,8 +618,11 @@ async function startAR() {
         5.5
       );
 
-    anchor.group.add(
-      glowMeshes["corazon-superior.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazon-superior.png"
+      ]
     );
 
 
@@ -554,8 +630,11 @@ async function startAR() {
      * CORAZÓN INFERIOR
      */
 
-    glowMeshes["corazon-inferior.png"] =
+    glowMeshes[
+      "corazon-inferior.png"
+    ] =
       createPulseGlow(
+
         layerMeshes[
           "corazon-inferior.png"
         ].material.map,
@@ -565,8 +644,11 @@ async function startAR() {
         4.5
       );
 
-    anchor.group.add(
-      glowMeshes["corazon-inferior.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazon-inferior.png"
+      ]
     );
 
 
@@ -574,8 +656,11 @@ async function startAR() {
      * CORAZONES DECORATIVOS
      */
 
-    glowMeshes["corazones.png"] =
+    glowMeshes[
+      "corazones.png"
+    ] =
       createPulseGlow(
+
         layerMeshes[
           "corazones.png"
         ].material.map,
@@ -585,8 +670,11 @@ async function startAR() {
         30.5
       );
 
-    anchor.group.add(
-      glowMeshes["corazones.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazones.png"
+      ]
     );
 
 
@@ -594,8 +682,11 @@ async function startAR() {
      * DESTELLOS
      */
 
-    glowMeshes["destellos.png"] =
+    glowMeshes[
+      "destellos.png"
+    ] =
       createPulseGlow(
+
         layerMeshes[
           "destellos.png"
         ].material.map,
@@ -605,8 +696,11 @@ async function startAR() {
         32.5
       );
 
-    anchor.group.add(
-      glowMeshes["destellos.png"]
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "destellos.png"
+      ]
     );
 
 
@@ -615,7 +709,9 @@ async function startAR() {
     ===================================================== */
 
     for (
-      const file of Object.keys(layerMeshes)
+      const file of Object.keys(
+        layerMeshes
+      )
     ) {
 
       layerMeshes[file]
@@ -624,7 +720,9 @@ async function startAR() {
 
 
     for (
-      const file of Object.keys(glowMeshes)
+      const file of Object.keys(
+        glowMeshes
+      )
     ) {
 
       glowMeshes[file]
@@ -633,7 +731,8 @@ async function startAR() {
 
 
     /*
-     * Estas capas nunca tendrán movimiento.
+     * Todas las capas estáticas
+     * parten exactamente del mismo punto.
      */
 
     [
@@ -663,8 +762,144 @@ async function startAR() {
     });
 
 
-    let targetFoundTime = null;
-    let targetVisible = false;
+    /* =====================================================
+       ESTABILIZADOR
+    ===================================================== */
+
+    const rawPosition =
+      new THREE.Vector3();
+
+    const rawQuaternion =
+      new THREE.Quaternion();
+
+    const rawScale =
+      new THREE.Vector3();
+
+
+    let stabilizerReady =
+      false;
+
+
+    /*
+     * Respuesta del estabilizador.
+     *
+     * Menor = más suave.
+     * Mayor = sigue más rápido.
+     */
+
+    const POSITION_RESPONSE = 9;
+
+    const ROTATION_RESPONSE = 11;
+
+    const SCALE_RESPONSE = 9;
+
+
+    function updateTrackingStabilizer(
+      delta
+    ) {
+
+      anchor.group.updateMatrixWorld(
+        true
+      );
+
+
+      /*
+       * Tomamos la transformación
+       * REAL que entrega MindAR.
+       */
+
+      anchor.group.matrixWorld.decompose(
+
+        rawPosition,
+
+        rawQuaternion,
+
+        rawScale
+      );
+
+
+      /*
+       * Primera detección:
+       * sincronizar inmediatamente.
+       */
+
+      if (!stabilizerReady) {
+
+        stabilizedGroup.position.copy(
+          rawPosition
+        );
+
+        stabilizedGroup.quaternion.copy(
+          rawQuaternion
+        );
+
+        stabilizedGroup.scale.copy(
+          rawScale
+        );
+
+        stabilizerReady = true;
+
+        return;
+      }
+
+
+      /*
+       * Suavizado independiente
+       * de FPS.
+       */
+
+      const positionAlpha =
+        1 -
+        Math.exp(
+          -POSITION_RESPONSE *
+          delta
+        );
+
+
+      const rotationAlpha =
+        1 -
+        Math.exp(
+          -ROTATION_RESPONSE *
+          delta
+        );
+
+
+      const scaleAlpha =
+        1 -
+        Math.exp(
+          -SCALE_RESPONSE *
+          delta
+        );
+
+
+      stabilizedGroup.position.lerp(
+        rawPosition,
+        positionAlpha
+      );
+
+
+      stabilizedGroup.quaternion.slerp(
+        rawQuaternion,
+        rotationAlpha
+      );
+
+
+      stabilizedGroup.scale.lerp(
+        rawScale,
+        scaleAlpha
+      );
+    }
+
+
+    /* =====================================================
+       ESTADO TARGET
+    ===================================================== */
+
+    let targetFoundTime =
+      null;
+
+    let targetVisible =
+      false;
 
 
     /* =====================================================
@@ -676,10 +911,13 @@ async function startAR() {
       targetFoundTime =
         performance.now();
 
-      targetVisible = true;
+      targetVisible =
+        true;
+
 
       status.textContent =
         "¡La estampita cobró vida!";
+
 
       status.classList.remove(
         "hidden"
@@ -693,40 +931,60 @@ async function startAR() {
 
     anchor.onTargetLost = () => {
 
-      targetFoundTime = null;
+      targetFoundTime =
+        null;
 
-      targetVisible = false;
+      targetVisible =
+        false;
+
+      stabilizerReady =
+        false;
+
+
+      stabilizedGroup.visible =
+        false;
+
 
       /*
-       * Resetear para que al volver a
-       * encontrar la tarjeta vuelva
-       * a aparecer desde cero.
+       * Reiniciar todas las capas
+       * para la próxima detección.
        */
 
       for (
-        const file of Object.keys(layerMeshes)
+        const file of Object.keys(
+          layerMeshes
+        )
       ) {
 
         layerMeshes[file]
           .material.opacity = 0;
       }
 
+
       for (
-        const file of Object.keys(glowMeshes)
+        const file of Object.keys(
+          glowMeshes
+        )
       ) {
 
         glowMeshes[file]
           .material.opacity = 0;
       }
 
+
       status.textContent =
         "Apuntá la cámara a la estampita";
+
 
       status.classList.remove(
         "hidden"
       );
     };
 
+
+    /* =====================================================
+       INICIAR
+    ===================================================== */
 
     status.textContent =
       "Preparando cámara…";
@@ -743,9 +1001,11 @@ async function startAR() {
       "hidden"
     );
 
+
     stopButton.classList.remove(
       "hidden"
     );
+
 
     status.textContent =
       "Apuntá la cámara a la estampita";
@@ -761,9 +1021,44 @@ async function startAR() {
 
     renderer.setAnimationLoop(() => {
 
-      const time =
-        clock.getElapsedTime();
+      const delta =
+        Math.min(
+          clock.getDelta(),
+          0.05
+        );
 
+
+      const time =
+        clock.elapsedTime;
+
+
+      /* ===================================================
+         ESTABILIZAR TRACKING
+      =================================================== */
+
+      if (targetVisible) {
+
+        stabilizedGroup.visible =
+          true;
+
+
+        updateTrackingStabilizer(
+          delta
+        );
+
+      } else {
+
+        stabilizedGroup.visible =
+          false;
+
+        stabilizerReady =
+          false;
+      }
+
+
+      /* ===================================================
+         TIEMPO DESDE DETECCIÓN
+      =================================================== */
 
       let elapsed = 999;
 
@@ -789,14 +1084,15 @@ async function startAR() {
         /*
          * FONDO
          *
-         * Aparece rápido y después queda
-         * completamente fijo.
+         * Aparece rápidamente y luego
+         * queda completamente fijo.
          */
 
         const bgProgress =
           easeOutCubic(
             elapsed / 0.35
           );
+
 
         layerMeshes[
           "fondo-limpio.png"
@@ -810,8 +1106,10 @@ async function startAR() {
 
         const girlProgress =
           easeOutCubic(
-            (elapsed - 0.12) / 0.70
+            (elapsed - 0.12) /
+            0.70
           );
+
 
         [
           "nena-cuerpo.png",
@@ -833,8 +1131,10 @@ async function startAR() {
 
         const catProgress =
           easeOutCubic(
-            (elapsed - 0.30) / 0.70
+            (elapsed - 0.30) /
+            0.70
           );
+
 
         [
           "gatito-superior.png",
@@ -848,38 +1148,45 @@ async function startAR() {
 
 
         /*
-         * PINCELADA
+         * PINCELADA LILA
          */
 
         layerMeshes[
           "pincelada-lila.png"
         ].material.opacity =
           easeOutCubic(
-            (elapsed - 0.05) / 0.55
+            (elapsed - 0.05) /
+            0.55
           );
 
 
         /*
-         * TEXTO COMUNIÓN
+         * COMUNIÓN
+         *
+         * PRIMERO
          */
 
         layerMeshes[
           "texto-comunion.png"
         ].material.opacity =
           easeOutCubic(
-            (elapsed - 0.18) / 0.85
+            (elapsed - 0.18) /
+            0.85
           );
 
 
         /*
-         * TEXTO JESÚS
+         * JESÚS
+         *
+         * DESPUÉS
          */
 
         layerMeshes[
           "texto-jesus.png"
         ].material.opacity =
           easeOutCubic(
-            (elapsed - 0.35) / 0.85
+            (elapsed - 0.35) /
+            0.85
           );
 
 
@@ -891,7 +1198,8 @@ async function startAR() {
           "cruz.png"
         ].material.opacity =
           easeOutCubic(
-            (elapsed - 0.20) / 0.65
+            (elapsed - 0.20) /
+            0.65
           );
 
 
@@ -901,13 +1209,16 @@ async function startAR() {
 
         const heartProgress =
           easeOutCubic(
-            (elapsed - 0.25) / 0.65
+            (elapsed - 0.25) /
+            0.65
           );
+
 
         layerMeshes[
           "corazon-superior.png"
         ].material.opacity =
           heartProgress;
+
 
         layerMeshes[
           "corazon-inferior.png"
@@ -921,8 +1232,10 @@ async function startAR() {
 
         const decorationProgress =
           easeOutCubic(
-            (elapsed - 0.30) / 0.75
+            (elapsed - 0.30) /
+            0.75
           );
+
 
         [
           "corazones.png",
@@ -940,7 +1253,7 @@ async function startAR() {
 
       /* ===================================================
          PELO
-         EXACTAMENTE COMO LO APROBASTE
+         MOVIMIENTO APROBADO
       =================================================== */
 
       const hair =
@@ -948,29 +1261,36 @@ async function startAR() {
           "nena-pelo.png"
         ];
 
+
       if (hair) {
 
         hair.position.x =
           commonPosition.x +
-          Math.sin(time * 1.2) *
+          Math.sin(
+            time * 1.2
+          ) *
           0.004;
+
 
         hair.position.y =
           commonPosition.y +
-          Math.sin(time * 1.5) *
+          Math.sin(
+            time * 1.5
+          ) *
           0.002;
       }
 
 
       /* ===================================================
          CORONA
-         EXACTAMENTE COMO LO APROBASTE
+         MOVIMIENTO APROBADO
       =================================================== */
 
       const crown =
         layerMeshes[
           "nena-corona.png"
         ];
+
 
       if (crown) {
 
@@ -981,12 +1301,14 @@ async function startAR() {
           ) *
           0.003;
 
+
         crown.position.y =
           commonPosition.y +
           Math.sin(
             time * 1.5 + 0.3
           ) *
           0.0015;
+
 
         crown.rotation.z =
           Math.sin(
@@ -1005,6 +1327,7 @@ async function startAR() {
           "gatito-superior.png"
         ];
 
+
       if (catTop) {
 
         catTop.position.x =
@@ -1013,6 +1336,7 @@ async function startAR() {
             time * 0.75 + 1.5
           ) *
           0.003;
+
 
         catTop.position.y =
           commonPosition.y +
@@ -1032,6 +1356,7 @@ async function startAR() {
           "gatito-inferior.png"
         ];
 
+
       if (catBottom) {
 
         catBottom.position.x =
@@ -1040,6 +1365,7 @@ async function startAR() {
             time * 0.65 + 3.0
           ) *
           0.0025;
+
 
         catBottom.position.y =
           commonPosition.y +
@@ -1060,10 +1386,12 @@ async function startAR() {
           "corazones.png"
         ];
 
+
       const decorativeHeartGlow =
         glowMeshes[
           "corazones.png"
         ];
+
 
       if (
         decorativeHearts &&
@@ -1078,10 +1406,12 @@ async function startAR() {
             0.4
           );
 
+
         decorativeHearts
           .material.opacity =
           0.82 +
           beat * 0.18;
+
 
         decorativeHeartGlow
           .material.opacity =
@@ -1098,10 +1428,12 @@ async function startAR() {
           "corazon-superior.png"
         ];
 
+
       const heartTopGlow =
         glowMeshes[
           "corazon-superior.png"
         ];
+
 
       if (
         heartTop &&
@@ -1116,9 +1448,11 @@ async function startAR() {
             0
           );
 
+
         heartTop.material.opacity =
           0.84 +
           beat * 0.16;
+
 
         heartTopGlow.material.opacity =
           beat * 0.42;
@@ -1134,10 +1468,12 @@ async function startAR() {
           "corazon-inferior.png"
         ];
 
+
       const heartBottomGlow =
         glowMeshes[
           "corazon-inferior.png"
         ];
+
 
       if (
         heartBottom &&
@@ -1152,9 +1488,11 @@ async function startAR() {
             1.8
           );
 
+
         heartBottom.material.opacity =
           0.84 +
           beat * 0.16;
+
 
         heartBottomGlow.material.opacity =
           beat * 0.42;
@@ -1171,10 +1509,12 @@ async function startAR() {
           "cruz.png"
         ];
 
+
       const crossGlow =
         glowMeshes[
           "cruz.png"
         ];
+
 
       if (
         cross &&
@@ -1192,9 +1532,11 @@ async function startAR() {
             5
           );
 
+
         cross.material.opacity =
           0.82 +
           pulse * 0.18;
+
 
         crossGlow.material.opacity =
           pulse * 0.62;
@@ -1203,7 +1545,7 @@ async function startAR() {
 
       /* ===================================================
          DESTELLOS
-         MÁS PERCEPTIBLES
+         FUERTES Y VISIBLES
       =================================================== */
 
       const sparkles =
@@ -1211,10 +1553,12 @@ async function startAR() {
           "destellos.png"
         ];
 
+
       const sparkleGlow =
         glowMeshes[
           "destellos.png"
         ];
+
 
       if (
         sparkles &&
@@ -1232,6 +1576,7 @@ async function startAR() {
             6
           );
 
+
         const wave2 =
           Math.pow(
             (
@@ -1241,6 +1586,7 @@ async function startAR() {
             ) / 2,
             9
           );
+
 
         const wave3 =
           Math.pow(
@@ -1252,6 +1598,7 @@ async function startAR() {
             12
           );
 
+
         const sparkle =
           clamp01(
             wave1 +
@@ -1259,9 +1606,11 @@ async function startAR() {
             wave3 * 0.45
           );
 
+
         sparkles.material.opacity =
           0.18 +
           sparkle * 0.82;
+
 
         sparkleGlow.material.opacity =
           0.08 +
@@ -1278,6 +1627,7 @@ async function startAR() {
           "estrellas.png"
         ];
 
+
       if (
         stars &&
         targetVisible
@@ -1292,6 +1642,7 @@ async function startAR() {
             ) / 2,
             3
           );
+
 
         stars.material.opacity =
           0.68 +
@@ -1308,16 +1659,12 @@ async function startAR() {
           "texto-jesus.png"
         ];
 
+
       const communionGlow =
         glowMeshes[
           "texto-comunion.png"
         ];
 
-
-      /*
-       * Función para hacer un recorrido
-       * ocasional del brillo.
-       */
 
       function updateTextSweep(
         glow,
@@ -1341,7 +1688,9 @@ async function startAR() {
 
 
         const localTime =
-          elapsed - startDelay;
+          elapsed -
+          startDelay;
+
 
         const cycle =
           localTime %
@@ -1356,11 +1705,6 @@ async function startAR() {
           const progress =
             cycle / duration;
 
-          /*
-           * El brillo entra desde
-           * la izquierda y sale
-           * por la derecha.
-           */
 
           glow.material
             .uniforms
@@ -1368,21 +1712,19 @@ async function startAR() {
             -0.15 +
             progress * 1.30;
 
-          /*
-           * Pico de intensidad
-           * en el centro del recorrido.
-           */
 
           const intensity =
             Math.sin(
               progress * Math.PI
             );
 
+
           glow.material
             .uniforms
             .strength.value =
             0.85 +
             intensity * 0.65;
+
 
           glow.material.opacity =
             0.35 +
@@ -1397,11 +1739,11 @@ async function startAR() {
 
 
       /*
-       * Jesús
+       * PRIMERO COMUNIÓN
        */
 
       updateTextSweep(
-        jesusGlow,
+        communionGlow,
         1.35,
         6.5,
         1.15
@@ -1409,14 +1751,11 @@ async function startAR() {
 
 
       /*
-       * Comunión
-       *
-       * Va ligeramente después
-       * para que no brillen juntos.
+       * DESPUÉS JESÚS
        */
 
       updateTextSweep(
-        communionGlow,
+        jesusGlow,
         2.6,
         6.5,
         1.15
@@ -1424,8 +1763,7 @@ async function startAR() {
 
 
       /* ===================================================
-         FONDO
-         SIEMPRE ESTABLE
+         FONDO SIEMPRE ESTABLE
       =================================================== */
 
       if (
@@ -1435,13 +1773,13 @@ async function startAR() {
 
         layerMeshes[
           "fondo-limpio.png"
-        ].material.opacity = 1;
+        ].material.opacity =
+          1;
       }
 
 
       /* ===================================================
-         MARCO
-         SIEMPRE ESTABLE
+         MARCO ESTABLE
       =================================================== */
 
       if (
@@ -1451,7 +1789,8 @@ async function startAR() {
 
         layerMeshes[
           "marco-corazones.png"
-        ].material.opacity = 1;
+        ].material.opacity =
+          1;
       }
 
 
@@ -1484,11 +1823,13 @@ async function startAR() {
     }
 
 
-    mindarThree = null;
+    mindarThree =
+      null;
 
 
     startButton.disabled =
       false;
+
 
     startButton.textContent =
       "Intentar nuevamente";
@@ -1496,6 +1837,7 @@ async function startAR() {
 
     status.textContent =
       "No se pudo iniciar la cámara.";
+
 
     status.classList.remove(
       "hidden"
@@ -1523,6 +1865,7 @@ function stopAR() {
 
   mindarThree.stop();
 
+
   mindarThree
     .renderer
     .setAnimationLoop(null);
@@ -1531,6 +1874,7 @@ function stopAR() {
   stopButton.classList.add(
     "hidden"
   );
+
 
   status.classList.add(
     "hidden"
@@ -1545,15 +1889,21 @@ function stopAR() {
   startButton.disabled =
     false;
 
+
   startButton.textContent =
     "Comenzar";
 
 
-  mindarThree = null;
+  mindarThree =
+    null;
 
-  layerMeshes = {};
 
-  glowMeshes = {};
+  layerMeshes =
+    {};
+
+
+  glowMeshes =
+    {};
 }
 
 
@@ -1565,6 +1915,7 @@ startButton.addEventListener(
   "click",
   startAR
 );
+
 
 stopButton.addEventListener(
   "click",
