@@ -7,6 +7,7 @@ const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
+
 let layerMeshes = {};
 let glowMeshes = {};
 
@@ -43,11 +44,11 @@ function createSweepGlow(texture, position, renderOrder) {
       },
 
       progress: {
-        value: -0.25
+        value: -10
       },
 
       width: {
-        value: 0.16
+        value: 0.10
       },
 
       strength: {
@@ -59,6 +60,7 @@ function createSweepGlow(texture, position, renderOrder) {
       varying vec2 vUv;
 
       void main() {
+
         vUv = uv;
 
         gl_Position =
@@ -84,20 +86,40 @@ function createSweepGlow(texture, position, renderOrder) {
           discard;
         }
 
+        /*
+         * Diagonal suave.
+         * Esto hace que el brillo atraviese
+         * las letras en diagonal.
+         */
+        float position =
+          vUv.x * 0.90 +
+          vUv.y * 0.20;
+
         float distanceFromGlow =
-          abs(vUv.x - progress);
+          abs(position - progress);
 
         float glow =
           1.0 -
-          smoothstep(0.0, width, distanceFromGlow);
+          smoothstep(
+            0.0,
+            width,
+            distanceFromGlow
+          );
 
         glow *= strength;
 
-        vec3 glowColor =
-          tex.rgb * glow * 2.2;
-
+        /*
+         * El brillo es blanco.
+         * Usamos solamente el alpha
+         * de la textura original.
+         */
         gl_FragColor =
-          vec4(glowColor, tex.a * glow);
+          vec4(
+            vec3(1.0),
+            tex.a * glow
+          );
+
+        #include <colorspace_fragment>
       }
     `,
 
@@ -120,31 +142,73 @@ function createSweepGlow(texture, position, renderOrder) {
 
 
 /* =========================================================
-   BRILLO GENERAL PARA UNA CAPA
+   BRILLO PULSANTE
 ========================================================= */
 
 function createPulseGlow(texture, position, renderOrder) {
 
-  const geometry = new THREE.PlaneGeometry(1, 1.5);
+  const geometry =
+    new THREE.PlaneGeometry(1, 1.5);
 
-  const material = new THREE.MeshBasicMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
-  });
+  const material =
+    new THREE.MeshBasicMaterial({
 
-  const mesh = new THREE.Mesh(
-    geometry,
-    material
-  );
+      map: texture,
+
+      transparent: true,
+
+      opacity: 0,
+
+      depthTest: false,
+
+      depthWrite: false,
+
+      blending: THREE.AdditiveBlending
+    });
+
+  const mesh =
+    new THREE.Mesh(
+      geometry,
+      material
+    );
 
   mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
+}
+
+
+/* =========================================================
+   LATIDO DOBLE
+========================================================= */
+
+function doubleBeat(time, period = 4.2, phase = 0) {
+
+  let t =
+    ((time + phase) % period + period) % period;
+
+  const beat1 =
+    Math.exp(
+      -Math.pow(
+        (t - 0.32) / 0.11,
+        2
+      )
+    );
+
+  const beat2 =
+    Math.exp(
+      -Math.pow(
+        (t - 0.58) / 0.13,
+        2
+      )
+    ) * 0.62;
+
+  return clamp01(
+    beat1 + beat2
+  );
 }
 
 
@@ -155,34 +219,38 @@ function createPulseGlow(texture, position, renderOrder) {
 async function startAR() {
 
   startButton.disabled = true;
-  startButton.textContent = "Abriendo cámara…";
+  startButton.textContent =
+    "Abriendo cámara…";
 
   try {
 
-    mindarThree = new MindARThree({
+    mindarThree =
+      new MindARThree({
 
-      container:
-        document.querySelector("#ar-container"),
+        container:
+          document.querySelector("#ar-container"),
 
-      imageTargetSrc:
-        "./targets/estampita.mind",
+        imageTargetSrc:
+          "./targets/estampita.mind",
 
-      maxTrack: 1,
+        maxTrack: 1,
 
-      /*
-       * Más suavizado para reducir el temblor.
-       * Mantiene una respuesta razonablemente rápida.
-       */
-      filterMinCF: 0.0005,
-      filterBeta: 1000,
+        /*
+         * FILTRO MÁS FUERTE
+         *
+         * La prioridad ahora es que
+         * la estampita deje de temblar.
+         */
+        filterMinCF: 0.0003,
+        filterBeta: 700,
 
-      warmupTolerance: 5,
-      missTolerance: 8,
+        warmupTolerance: 7,
+        missTolerance: 10,
 
-      uiLoading: "no",
-      uiScanning: "no",
-      uiError: "no"
-    });
+        uiLoading: "no",
+        uiScanning: "no",
+        uiError: "no"
+      });
 
 
     const {
@@ -193,7 +261,10 @@ async function startAR() {
 
 
     renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, 2)
+      Math.min(
+        window.devicePixelRatio,
+        2
+      )
     );
 
     renderer.outputColorSpace =
@@ -202,6 +273,7 @@ async function startAR() {
 
     const anchor =
       mindarThree.addAnchor(0);
+
 
     const textureLoader =
       new THREE.TextureLoader();
@@ -297,15 +369,6 @@ async function startAR() {
         order: 21
       },
 
-      /*
-       * Este archivo contiene los corazones rosas
-       * decorativos.
-       *
-       * NO contiene:
-       * - corazón debajo de la cruz
-       * - corazón debajo del texto Jesús
-       */
-
       {
         file: "corazones.png",
         name: "Corazones decorativos",
@@ -333,7 +396,7 @@ async function startAR() {
 
 
     /* =====================================================
-       CARGA DE TODAS LAS CAPAS
+       CARGAR CAPAS
     ===================================================== */
 
     for (const layer of layers) {
@@ -373,7 +436,9 @@ async function startAR() {
 
           depthTest: false,
 
-          depthWrite: false
+          depthWrite: false,
+
+          opacity: 1
         });
 
 
@@ -406,16 +471,15 @@ async function startAR() {
 
 
     /* =====================================================
-       CAPAS DE BRILLO
+       BRILLOS
     ===================================================== */
 
     /*
-     * TEXTO JESÚS
+     * TEXTOS
      */
 
     glowMeshes["texto-jesus.png"] =
       createSweepGlow(
-
         layerMeshes[
           "texto-jesus.png"
         ].material.map,
@@ -425,19 +489,13 @@ async function startAR() {
         1.5
       );
 
-
     anchor.group.add(
       glowMeshes["texto-jesus.png"]
     );
 
 
-    /*
-     * TEXTO COMUNIÓN
-     */
-
     glowMeshes["texto-comunion.png"] =
       createSweepGlow(
-
         layerMeshes[
           "texto-comunion.png"
         ].material.map,
@@ -446,7 +504,6 @@ async function startAR() {
 
         3.5
       );
-
 
     anchor.group.add(
       glowMeshes["texto-comunion.png"]
@@ -459,7 +516,6 @@ async function startAR() {
 
     glowMeshes["cruz.png"] =
       createPulseGlow(
-
         layerMeshes[
           "cruz.png"
         ].material.map,
@@ -468,7 +524,6 @@ async function startAR() {
 
         6.5
       );
-
 
     anchor.group.add(
       glowMeshes["cruz.png"]
@@ -481,7 +536,6 @@ async function startAR() {
 
     glowMeshes["corazon-superior.png"] =
       createPulseGlow(
-
         layerMeshes[
           "corazon-superior.png"
         ].material.map,
@@ -490,7 +544,6 @@ async function startAR() {
 
         5.5
       );
-
 
     anchor.group.add(
       glowMeshes["corazon-superior.png"]
@@ -503,7 +556,6 @@ async function startAR() {
 
     glowMeshes["corazon-inferior.png"] =
       createPulseGlow(
-
         layerMeshes[
           "corazon-inferior.png"
         ].material.map,
@@ -512,7 +564,6 @@ async function startAR() {
 
         4.5
       );
-
 
     anchor.group.add(
       glowMeshes["corazon-inferior.png"]
@@ -525,7 +576,6 @@ async function startAR() {
 
     glowMeshes["corazones.png"] =
       createPulseGlow(
-
         layerMeshes[
           "corazones.png"
         ].material.map,
@@ -534,7 +584,6 @@ async function startAR() {
 
         30.5
       );
-
 
     anchor.group.add(
       glowMeshes["corazones.png"]
@@ -547,7 +596,6 @@ async function startAR() {
 
     glowMeshes["destellos.png"] =
       createPulseGlow(
-
         layerMeshes[
           "destellos.png"
         ].material.map,
@@ -556,7 +604,6 @@ async function startAR() {
 
         32.5
       );
-
 
     anchor.group.add(
       glowMeshes["destellos.png"]
@@ -567,38 +614,57 @@ async function startAR() {
        ESTADO INICIAL
     ===================================================== */
 
-    const allLayers =
-      Object.keys(layerMeshes);
-
-
-    for (const file of allLayers) {
+    for (
+      const file of Object.keys(layerMeshes)
+    ) {
 
       layerMeshes[file]
         .material.opacity = 0;
     }
 
 
-    /*
-     * El fondo también empieza invisible.
-     */
-
-    layerMeshes[
-      "fondo-limpio.png"
-    ].material.opacity = 0;
-
-
-    /*
-     * Brillos inicialmente apagados.
-     */
-
-    for (const file of Object.keys(glowMeshes)) {
+    for (
+      const file of Object.keys(glowMeshes)
+    ) {
 
       glowMeshes[file]
         .material.opacity = 0;
     }
 
 
+    /*
+     * Estas capas nunca tendrán movimiento.
+     */
+
+    [
+      "fondo-limpio.png",
+      "texto-jesus.png",
+      "pincelada-lila.png",
+      "texto-comunion.png",
+      "corazon-inferior.png",
+      "corazon-superior.png",
+      "cruz.png",
+      "nena-cuerpo.png",
+      "nena-flores.png",
+      "nena-cara.png",
+      "corazones.png",
+      "estrellas.png",
+      "destellos.png",
+      "marco-corazones.png"
+    ].forEach((file) => {
+
+      if (layerMeshes[file]) {
+
+        layerMeshes[file]
+          .position.copy(
+            commonPosition
+          );
+      }
+    });
+
+
     let targetFoundTime = null;
+    let targetVisible = false;
 
 
     /* =====================================================
@@ -609,6 +675,8 @@ async function startAR() {
 
       targetFoundTime =
         performance.now();
+
+      targetVisible = true;
 
       status.textContent =
         "¡La estampita cobró vida!";
@@ -626,6 +694,30 @@ async function startAR() {
     anchor.onTargetLost = () => {
 
       targetFoundTime = null;
+
+      targetVisible = false;
+
+      /*
+       * Resetear para que al volver a
+       * encontrar la tarjeta vuelva
+       * a aparecer desde cero.
+       */
+
+      for (
+        const file of Object.keys(layerMeshes)
+      ) {
+
+        layerMeshes[file]
+          .material.opacity = 0;
+      }
+
+      for (
+        const file of Object.keys(glowMeshes)
+      ) {
+
+        glowMeshes[file]
+          .material.opacity = 0;
+      }
 
       status.textContent =
         "Apuntá la cámara a la estampita";
@@ -655,7 +747,6 @@ async function startAR() {
       "hidden"
     );
 
-
     status.textContent =
       "Apuntá la cámara a la estampita";
 
@@ -676,12 +767,16 @@ async function startAR() {
 
       let elapsed = 999;
 
-      if (targetFoundTime !== null) {
+
+      if (
+        targetFoundTime !== null
+      ) {
 
         elapsed =
-          (performance.now() -
-            targetFoundTime) /
-          1000;
+          (
+            performance.now() -
+            targetFoundTime
+          ) / 1000;
       }
 
 
@@ -689,17 +784,19 @@ async function startAR() {
          APARICIÓN INICIAL
       =================================================== */
 
-      if (targetFoundTime !== null) {
+      if (targetVisible) {
 
         /*
          * FONDO
+         *
+         * Aparece rápido y después queda
+         * completamente fijo.
          */
 
         const bgProgress =
           easeOutCubic(
-            elapsed / 0.45
+            elapsed / 0.35
           );
-
 
         layerMeshes[
           "fondo-limpio.png"
@@ -708,100 +805,13 @@ async function startAR() {
 
 
         /*
-         * PINCELADA
-         */
-
-        const brushProgress =
-          easeOutCubic(
-            (elapsed - 0.08) / 0.65
-          );
-
-
-        layerMeshes[
-          "pincelada-lila.png"
-        ].material.opacity =
-          brushProgress;
-
-
-        /*
-         * COMUNIÓN
-         */
-
-        const communionProgress =
-          easeOutCubic(
-            (elapsed - 0.18) / 1.15
-          );
-
-
-        layerMeshes[
-          "texto-comunion.png"
-        ].material.opacity =
-          communionProgress;
-
-
-        /*
-         * JESÚS
-         */
-
-        const jesusProgress =
-          easeOutCubic(
-            (elapsed - 0.35) / 1.1
-          );
-
-
-        layerMeshes[
-          "texto-jesus.png"
-        ].material.opacity =
-          jesusProgress;
-
-
-        /*
-         * CRUZ
-         */
-
-        const crossProgress =
-          easeOutCubic(
-            (elapsed - 0.22) / 0.75
-          );
-
-
-        layerMeshes[
-          "cruz.png"
-        ].material.opacity =
-          crossProgress;
-
-
-        /*
-         * CORAZONES PRINCIPALES
-         */
-
-        const heartProgress =
-          easeOutCubic(
-            (elapsed - 0.30) / 0.75
-          );
-
-
-        layerMeshes[
-          "corazon-superior.png"
-        ].material.opacity =
-          heartProgress;
-
-
-        layerMeshes[
-          "corazon-inferior.png"
-        ].material.opacity =
-          heartProgress;
-
-
-        /*
-         * NENA
+         * ILUSTRACIÓN
          */
 
         const girlProgress =
           easeOutCubic(
-            (elapsed - 0.18) / 0.85
+            (elapsed - 0.12) / 0.70
           );
-
 
         [
           "nena-cuerpo.png",
@@ -814,7 +824,6 @@ async function startAR() {
           layerMeshes[file]
             .material.opacity =
             girlProgress;
-
         });
 
 
@@ -824,9 +833,8 @@ async function startAR() {
 
         const catProgress =
           easeOutCubic(
-            (elapsed - 0.45) / 0.8
+            (elapsed - 0.30) / 0.70
           );
-
 
         [
           "gatito-superior.png",
@@ -836,8 +844,75 @@ async function startAR() {
           layerMeshes[file]
             .material.opacity =
             catProgress;
-
         });
+
+
+        /*
+         * PINCELADA
+         */
+
+        layerMeshes[
+          "pincelada-lila.png"
+        ].material.opacity =
+          easeOutCubic(
+            (elapsed - 0.05) / 0.55
+          );
+
+
+        /*
+         * TEXTO COMUNIÓN
+         */
+
+        layerMeshes[
+          "texto-comunion.png"
+        ].material.opacity =
+          easeOutCubic(
+            (elapsed - 0.18) / 0.85
+          );
+
+
+        /*
+         * TEXTO JESÚS
+         */
+
+        layerMeshes[
+          "texto-jesus.png"
+        ].material.opacity =
+          easeOutCubic(
+            (elapsed - 0.35) / 0.85
+          );
+
+
+        /*
+         * CRUZ
+         */
+
+        layerMeshes[
+          "cruz.png"
+        ].material.opacity =
+          easeOutCubic(
+            (elapsed - 0.20) / 0.65
+          );
+
+
+        /*
+         * CORAZONES PRINCIPALES
+         */
+
+        const heartProgress =
+          easeOutCubic(
+            (elapsed - 0.25) / 0.65
+          );
+
+        layerMeshes[
+          "corazon-superior.png"
+        ].material.opacity =
+          heartProgress;
+
+        layerMeshes[
+          "corazon-inferior.png"
+        ].material.opacity =
+          heartProgress;
 
 
         /*
@@ -846,9 +921,8 @@ async function startAR() {
 
         const decorationProgress =
           easeOutCubic(
-            (elapsed - 0.38) / 0.9
+            (elapsed - 0.30) / 0.75
           );
-
 
         [
           "corazones.png",
@@ -860,61 +934,19 @@ async function startAR() {
           layerMeshes[file]
             .material.opacity =
             decorationProgress;
-
         });
       }
 
 
       /* ===================================================
-         NENA
-         Mantengo el movimiento que ya aprobaste.
-      =================================================== */
-
-      const body =
-        layerMeshes["nena-cuerpo.png"];
-
-      if (body) {
-
-        body.position.x =
-          commonPosition.x +
-          Math.sin(time * 0.9) *
-          0.0015;
-
-        body.position.y =
-          commonPosition.y +
-          Math.sin(time * 1.15) *
-          0.001;
-      }
-
-
-      /* ===================================================
-         FLORES
-      =================================================== */
-
-      const flowers =
-        layerMeshes["nena-flores.png"];
-
-      if (flowers) {
-
-        flowers.position.x =
-          commonPosition.x +
-          Math.sin(time * 1.05 + 0.7) *
-          0.002;
-
-        flowers.position.y =
-          commonPosition.y +
-          Math.sin(time * 1.25 + 0.4) *
-          0.0015;
-      }
-
-
-      /* ===================================================
          PELO
-         EXACTAMENTE COMO ESTABA
+         EXACTAMENTE COMO LO APROBASTE
       =================================================== */
 
       const hair =
-        layerMeshes["nena-pelo.png"];
+        layerMeshes[
+          "nena-pelo.png"
+        ];
 
       if (hair) {
 
@@ -932,69 +964,61 @@ async function startAR() {
 
       /* ===================================================
          CORONA
-         EXACTAMENTE COMO ESTABA
+         EXACTAMENTE COMO LO APROBASTE
       =================================================== */
 
       const crown =
-        layerMeshes["nena-corona.png"];
+        layerMeshes[
+          "nena-corona.png"
+        ];
 
       if (crown) {
 
         crown.position.x =
           commonPosition.x +
-          Math.sin(time * 1.2 + 0.3) *
+          Math.sin(
+            time * 1.2 + 0.3
+          ) *
           0.003;
 
         crown.position.y =
           commonPosition.y +
-          Math.sin(time * 1.5 + 0.3) *
+          Math.sin(
+            time * 1.5 + 0.3
+          ) *
           0.0015;
 
         crown.rotation.z =
-          Math.sin(time * 1.1) *
+          Math.sin(
+            time * 1.1
+          ) *
           0.008;
       }
 
 
       /* ===================================================
-         CARA
-      =================================================== */
-
-      const face =
-        layerMeshes["nena-cara.png"];
-
-      if (face) {
-
-        face.position.x =
-          commonPosition.x +
-          Math.sin(time * 0.95 + 0.8) *
-          0.0008;
-
-        face.position.y =
-          commonPosition.y +
-          Math.sin(time * 1.1 + 0.5) *
-          0.0006;
-      }
-
-
-      /* ===================================================
          GATITO SUPERIOR
-         Mantengo el movimiento actual.
       =================================================== */
 
       const catTop =
-        layerMeshes["gatito-superior.png"];
+        layerMeshes[
+          "gatito-superior.png"
+        ];
 
       if (catTop) {
 
         catTop.position.x =
           commonPosition.x +
-          Math.sin(time * 0.75 + 1.5) *
+          Math.sin(
+            time * 0.75 + 1.5
+          ) *
           0.003;
 
         catTop.position.y =
           commonPosition.y +
-          Math.sin(time * 1.0 + 0.5) *
+          Math.sin(
+            time * 1.0 + 0.5
+          ) *
           0.004;
       }
 
@@ -1004,77 +1028,69 @@ async function startAR() {
       =================================================== */
 
       const catBottom =
-        layerMeshes["gatito-inferior.png"];
+        layerMeshes[
+          "gatito-inferior.png"
+        ];
 
       if (catBottom) {
 
         catBottom.position.x =
           commonPosition.x +
-          Math.sin(time * 0.65 + 3.0) *
+          Math.sin(
+            time * 0.65 + 3.0
+          ) *
           0.0025;
 
         catBottom.position.y =
           commonPosition.y +
-          Math.sin(time * 0.9 + 2.0) *
+          Math.sin(
+            time * 0.9 + 2.0
+          ) *
           0.0035;
       }
 
 
       /* ===================================================
          CORAZONES DECORATIVOS
-         LATIDO
+         LATIDO DOBLE
       =================================================== */
 
       const decorativeHearts =
-        layerMeshes["corazones.png"];
+        layerMeshes[
+          "corazones.png"
+        ];
 
       const decorativeHeartGlow =
-        glowMeshes["corazones.png"];
+        glowMeshes[
+          "corazones.png"
+        ];
 
       if (
         decorativeHearts &&
-        decorativeHeartGlow
+        decorativeHeartGlow &&
+        targetVisible
       ) {
 
-        /*
-         * Dos pulsos cercanos entre sí:
-         * "tum-tum"
-         */
-
         const beat =
-          Math.max(
-            0,
-            Math.sin(
-              time * 1.7
-            )
+          doubleBeat(
+            time,
+            4.6,
+            0.4
           );
-
-        const secondBeat =
-          Math.max(
-            0,
-            Math.sin(
-              time * 1.7 - 0.8
-            )
-          ) * 0.35;
-
 
         decorativeHearts
           .material.opacity =
-          0.72 +
-          beat * 0.22 +
-          secondBeat * 0.10;
-
+          0.82 +
+          beat * 0.18;
 
         decorativeHeartGlow
           .material.opacity =
-          beat * 0.45 +
-          secondBeat * 0.20;
+          beat * 0.48;
       }
 
 
       /* ===================================================
          CORAZÓN SUPERIOR
-         LATIDO MÁS MARCADO
       =================================================== */
 
       const heartTop =
@@ -1089,25 +1105,23 @@ async function startAR() {
 
       if (
         heartTop &&
-        heartTopGlow
+        heartTopGlow &&
+        targetVisible
       ) {
 
-        const pulse =
-          Math.max(
-            0,
-            Math.sin(
-              time * 1.8
-            )
+        const beat =
+          doubleBeat(
+            time,
+            4.0,
+            0
           );
 
-
         heartTop.material.opacity =
-          0.78 +
-          pulse * 0.22;
-
+          0.84 +
+          beat * 0.16;
 
         heartTopGlow.material.opacity =
-          pulse * 0.55;
+          beat * 0.42;
       }
 
 
@@ -1127,99 +1141,131 @@ async function startAR() {
 
       if (
         heartBottom &&
-        heartBottomGlow
+        heartBottomGlow &&
+        targetVisible
       ) {
 
-        const pulse =
-          Math.max(
-            0,
-            Math.sin(
-              time * 1.65 + 1.3
-            )
+        const beat =
+          doubleBeat(
+            time,
+            4.0,
+            1.8
           );
 
-
         heartBottom.material.opacity =
-          0.78 +
-          pulse * 0.22;
-
+          0.84 +
+          beat * 0.16;
 
         heartBottomGlow.material.opacity =
-          pulse * 0.55;
+          beat * 0.42;
       }
 
 
       /* ===================================================
          CRUZ
-         BRILLO PERIÓDICO
+         PULSO DE LUZ
       =================================================== */
 
+      const cross =
+        layerMeshes[
+          "cruz.png"
+        ];
+
       const crossGlow =
-        glowMeshes["cruz.png"];
+        glowMeshes[
+          "cruz.png"
+        ];
 
-      if (crossGlow) {
+      if (
+        cross &&
+        crossGlow &&
+        targetVisible
+      ) {
 
-        const crossPulse =
-          Math.max(
-            0,
-            Math.sin(
-              time * 0.85
-            )
+        const pulse =
+          Math.pow(
+            (
+              Math.sin(
+                time * 0.75
+              ) + 1
+            ) / 2,
+            5
           );
 
+        cross.material.opacity =
+          0.82 +
+          pulse * 0.18;
 
         crossGlow.material.opacity =
-          crossPulse * 0.65;
+          pulse * 0.62;
       }
 
 
       /* ===================================================
          DESTELLOS
-         MUCHO MÁS VISIBLES
+         MÁS PERCEPTIBLES
       =================================================== */
 
       const sparkles =
-        layerMeshes["destellos.png"];
+        layerMeshes[
+          "destellos.png"
+        ];
 
       const sparkleGlow =
-        glowMeshes["destellos.png"];
-
+        glowMeshes[
+          "destellos.png"
+        ];
 
       if (
         sparkles &&
-        sparkleGlow
+        sparkleGlow &&
+        targetVisible
       ) {
 
         const wave1 =
-          (Math.sin(
-            time * 2.2
-          ) + 1) / 2;
-
+          Math.pow(
+            (
+              Math.sin(
+                time * 1.8
+              ) + 1
+            ) / 2,
+            6
+          );
 
         const wave2 =
-          (Math.sin(
-            time * 3.7 + 1.8
-          ) + 1) / 2;
-
+          Math.pow(
+            (
+              Math.sin(
+                time * 3.1 + 1.7
+              ) + 1
+            ) / 2,
+            9
+          );
 
         const wave3 =
-          (Math.sin(
-            time * 5.1 + 3.2
-          ) + 1) / 2;
+          Math.pow(
+            (
+              Math.sin(
+                time * 4.7 + 3.0
+              ) + 1
+            ) / 2,
+            12
+          );
 
+        const sparkle =
+          clamp01(
+            wave1 +
+            wave2 * 0.65 +
+            wave3 * 0.45
+          );
 
         sparkles.material.opacity =
-          0.30 +
-          wave1 * 0.35 +
-          wave2 * 0.25 +
-          wave3 * 0.10;
-
+          0.18 +
+          sparkle * 0.82;
 
         sparkleGlow.material.opacity =
-          0.12 +
-          wave1 * 0.45 +
-          wave2 * 0.30 +
-          wave3 * 0.20;
+          0.08 +
+          sparkle * 0.90;
       }
 
 
@@ -1228,25 +1274,33 @@ async function startAR() {
       =================================================== */
 
       const stars =
-        layerMeshes["estrellas.png"];
+        layerMeshes[
+          "estrellas.png"
+        ];
 
-      if (stars) {
+      if (
+        stars &&
+        targetVisible
+      ) {
 
         const starWave =
-          (Math.sin(
-            time * 1.4 + 0.8
-          ) + 1) / 2;
-
+          Math.pow(
+            (
+              Math.sin(
+                time * 1.25 + 0.8
+              ) + 1
+            ) / 2,
+            3
+          );
 
         stars.material.opacity =
-          0.62 +
-          starWave * 0.38;
+          0.68 +
+          starWave * 0.32;
       }
 
 
       /* ===================================================
-         TEXTOS
-         BRILLO QUE LOS RECORRE
+         BRILLO DE TEXTO
       =================================================== */
 
       const jesusGlow =
@@ -1261,133 +1315,143 @@ async function startAR() {
 
 
       /*
-       * Jesús:
-       * un recorrido cada ~7 segundos.
+       * Función para hacer un recorrido
+       * ocasional del brillo.
        */
 
-      if (jesusGlow) {
+      function updateTextSweep(
+        glow,
+        startDelay,
+        cycleLength,
+        duration
+      ) {
+
+        if (
+          !glow ||
+          !targetVisible ||
+          elapsed < startDelay
+        ) {
+
+          if (glow) {
+            glow.material.opacity = 0;
+          }
+
+          return;
+        }
+
+
+        const localTime =
+          elapsed - startDelay;
 
         const cycle =
-          (
-            (time % 7.0) /
-            7.0
-          );
+          localTime %
+          cycleLength;
 
 
-        jesusGlow.material.uniforms
-          .progress.value =
-          -0.22 +
-          cycle * 1.44;
+        if (
+          cycle >= 0 &&
+          cycle < duration
+        ) {
 
+          const progress =
+            cycle / duration;
 
-        jesusGlow.material.uniforms
-          .strength.value =
-          1.15;
+          /*
+           * El brillo entra desde
+           * la izquierda y sale
+           * por la derecha.
+           */
 
+          glow.material
+            .uniforms
+            .progress.value =
+            -0.15 +
+            progress * 1.30;
 
-        /*
-         * El brillo solo aparece
-         * cuando está dentro de la tarjeta.
-         */
+          /*
+           * Pico de intensidad
+           * en el centro del recorrido.
+           */
 
-        const active =
-          cycle > 0.08 &&
-          cycle < 0.92;
+          const intensity =
+            Math.sin(
+              progress * Math.PI
+            );
 
+          glow.material
+            .uniforms
+            .strength.value =
+            0.85 +
+            intensity * 0.65;
 
-        jesusGlow.material.opacity =
-          active ? 0.9 : 0;
+          glow.material.opacity =
+            0.35 +
+            intensity * 0.65;
+
+        } else {
+
+          glow.material.opacity =
+            0;
+        }
       }
 
 
       /*
-       * Comunión:
-       * fase diferente para que no
-       * brillen simultáneamente.
+       * Jesús
        */
 
-      if (communionGlow) {
-
-        const cycle =
-          (
-            (
-              time + 3.2
-            ) % 7.0
-          ) / 7.0;
+      updateTextSweep(
+        jesusGlow,
+        1.35,
+        6.5,
+        1.15
+      );
 
 
-        communionGlow.material.uniforms
-          .progress.value =
-          -0.22 +
-          cycle * 1.44;
+      /*
+       * Comunión
+       *
+       * Va ligeramente después
+       * para que no brillen juntos.
+       */
 
-
-        communionGlow.material.uniforms
-          .strength.value =
-          1.15;
-
-
-        const active =
-          cycle > 0.08 &&
-          cycle < 0.92;
-
-
-        communionGlow.material.opacity =
-          active ? 0.9 : 0;
-      }
-
-
-      /* ===================================================
-         PINCELADA
-         SIEMPRE ESTABLE DETRÁS DE COMUNIÓN
-      =================================================== */
-
-      const brush =
-        layerMeshes[
-          "pincelada-lila.png"
-        ];
-
-      if (brush && elapsed > 0.8) {
-
-        brush.material.opacity = 1;
-      }
+      updateTextSweep(
+        communionGlow,
+        2.6,
+        6.5,
+        1.15
+      );
 
 
       /* ===================================================
          FONDO
-         COMPLETAMENTE ESTABLE
+         SIEMPRE ESTABLE
       =================================================== */
 
-      const background =
-        layerMeshes[
-          "fondo-limpio.png"
-        ];
-
       if (
-        background &&
-        elapsed > 0.5
+        targetVisible &&
+        elapsed > 0.35
       ) {
 
-        background.material.opacity = 1;
+        layerMeshes[
+          "fondo-limpio.png"
+        ].material.opacity = 1;
       }
 
 
       /* ===================================================
          MARCO
-         COMPLETAMENTE ESTABLE
+         SIEMPRE ESTABLE
       =================================================== */
 
-      const frame =
-        layerMeshes[
-          "marco-corazones.png"
-        ];
-
       if (
-        frame &&
-        elapsed > 1.0
+        targetVisible &&
+        elapsed > 0.9
       ) {
 
-        frame.material.opacity = 1;
+        layerMeshes[
+          "marco-corazones.png"
+        ].material.opacity = 1;
       }
 
 
@@ -1395,7 +1459,6 @@ async function startAR() {
         scene,
         camera
       );
-
     });
 
 
@@ -1424,7 +1487,8 @@ async function startAR() {
     mindarThree = null;
 
 
-    startButton.disabled = false;
+    startButton.disabled =
+      false;
 
     startButton.textContent =
       "Intentar nuevamente";
@@ -1478,7 +1542,8 @@ function stopAR() {
   );
 
 
-  startButton.disabled = false;
+  startButton.disabled =
+    false;
 
   startButton.textContent =
     "Comenzar";
