@@ -8,6 +8,7 @@ const status = document.querySelector("#status");
 
 let mindarThree = null;
 let hairLayer = null;
+let crownLayer = null;
 
 async function startAR() {
   startButton.disabled = true;
@@ -176,6 +177,9 @@ async function startAR() {
       if (layer.file === "nena-pelo.png") {
   hairLayer = mesh;
 }
+      if (layer.file === "nena-corona.png") {
+  crownLayer = mesh;
+}
       anchor.group.add(mesh);
     }
 
@@ -213,6 +217,16 @@ renderer.setAnimationLoop(() => {
     hairLayer.position.y =
       commonPosition.y + Math.sin(time * 1.5) * 0.002;
   }
+  if (crownLayer) {
+  crownLayer.position.x =
+    commonPosition.x + Math.sin(time * 1.2 + 0.3) * 0.003;
+
+  crownLayer.position.y =
+    commonPosition.y + Math.sin(time * 1.5 + 0.3) * 0.0015;
+
+  crownLayer.rotation.z =
+    Math.sin(time * 1.1) * 0.008;
+}
 
   renderer.render(scene, camera);
 });
