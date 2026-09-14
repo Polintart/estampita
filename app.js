@@ -1,1091 +1,515 @@
 import * as THREE from "three";
-import { MindARThree } from "mind-ar-image-three";
+import { MindARThree } from "mindar-image-three";
 
 const startScreen = document.querySelector("#start-screen");
 const startButton = document.querySelector("#start-button");
+const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
-let layerMeshes = [];
-let frontGroup = null;
-let backGroup = null;
-let flipContainer = null;
-let stabilizedGroup = null;
-let flipButton = null;
-let flipMagic = null;
-let targetVisible = false;
+let layerMeshes = {};
+let glowMeshes = {};
 
-let flipState = "front";
-let flipStartTime = 0;
-let flipFrom = 0;
-let flipTo = 0;
+const commonPosition = new THREE.Vector3(-0.02, 0, 0.02);
 
-const FLIP_DURATION = 1.55;
-
-const REVEAL_START = 0.45;
-const REVEAL_DURATION = 3.50;
-const REVEAL_INITIAL = -0.10;
-
-const POSITION_RESPONSE = 9;
-const ROTATION_RESPONSE = 11;
-const SCALE_RESPONSE = 9;
-
-let revealMaterials = [];
-
-function clamp(v, a, b) {
-  return Math.max(a, Math.min(b, v));
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
 }
 
-function ease(t) {
-  t = clamp(t, 0, 1);
-
-  return t < 0.5
-    ? 4 * t * t * t
-    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function easeOutCubic(value) {
+  value = clamp01(value);
+  return 1 - Math.pow(1 - value, 3);
 }
 
-function smoothFactor(response, dt) {
-  return 1 - Math.exp(-response * dt);
+function easeInOut(value) {
+  value = clamp01(value);
+  return value * value * (3 - 2 * value);
 }
-
-function smoothstep01(x) {
-  x = clamp(x, 0, 1);
-  return x * x * (3 - 2 * x);
-}
-
-function setStatus(text) {
-  if (status) {
-    status.textContent = text;
-  }
-}
-
-
-// ============================================================
-// REVELADO ORGÁNICO
-// ============================================================
 
 function applyRevealMask(material) {
-
-  material.transparent = true;
-  material.depthWrite = false;
-
-  const uniforms = {
-    revealProgress: {
-      value: REVEAL_INITIAL
-    },
-
-    revealGlow: {
-      value: 0
-    }
-  };
+  material.userData.revealProgress = 1.1;
+  material.userData.revealSoftness = 0.035;
 
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.revealProgress = {
+      value: material.userData.revealProgress
+    };
 
-    shader.uniforms.revealProgress =
-      uniforms.revealProgress;
+    shader.uniforms.revealSoftness = {
+      value: material.userData.revealSoftness
+    };
 
-    shader.uniforms.revealGlow =
-      uniforms.revealGlow;
+    material.userData.revealUniforms = shader.uniforms;
 
     shader.fragmentShader =
       shader.fragmentShader.replace(
-        "#include <map_pars_fragment>",
-
+        "#include <alphatest_fragment>",
         `
-        #include <map_pars_fragment>
+          float revealAmount =
+            smoothstep(
+              revealProgress - revealSoftness,
+              revealProgress + revealSoftness,
+              vUv.y
+            );
 
-        uniform float revealProgress;
-        uniform float revealGlow;
+          diffuseColor.a *= revealAmount;
+
+          #include <alphatest_fragment>
         `
       );
 
     shader.fragmentShader =
-      shader.fragmentShader.replace(
-        "#include <map_fragment>",
-
-        `
-        #include <map_fragment>
-
-        float organicWave =
-          sin(vMapUv.x * 8.0 + revealProgress * 5.0)
-          * 0.018;
-
-        organicWave +=
-          sin(vMapUv.x * 17.0 - revealProgress * 7.0)
-          * 0.012;
-
-        organicWave +=
-          sin(vMapUv.x * 31.0 + revealProgress * 3.0)
-          * 0.007;
-
-        organicWave +=
-          sin(vMapUv.x * 4.5 + revealProgress * 11.0)
-          * 0.020;
-
-        float organicY =
-          sin(vMapUv.y * 18.0 + vMapUv.x * 9.0)
-          * 0.006;
-
-        float revealEdge =
-          revealProgress +
-          organicWave +
-          organicY;
-
-        float revealAmount =
-          smoothstep(
-            revealEdge - 0.030,
-            revealEdge + 0.030,
-            vMapUv.y
-          );
-
-        diffuseColor.a *= revealAmount;
-
-        float edgeDistance =
-          abs(vMapUv.y - revealEdge);
-
-        float edgeGlow =
-          smoothstep(
-            0.075,
-            0.0,
-            edgeDistance
-          ) * revealGlow;
-
-        diffuseColor.rgb +=
-          vec3(1.0, 0.68, 0.20)
-          * edgeGlow;
-        `
-      );
+      "uniform float revealProgress;\nuniform float revealSoftness;\n" +
+      shader.fragmentShader;
   };
 
-  material.userData.revealUniforms =
-    uniforms;
-
-  revealMaterials.push(material);
+  material.needsUpdate = true;
 }
 
+function createSweepGlow(texture, position, renderOrder) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: texture },
+      progress: { value: -10 },
+      width: { value: 0.10 },
+      strength: { value: 1.0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float progress;
+      uniform float width;
+      uniform float strength;
+      varying vec2 vUv;
 
-// ============================================================
-// BRILLO DE TEXTOS
-// ============================================================
+      void main() {
+        vec4 tex = texture2D(map, vUv);
 
-function createSweepGlow(texture) {
+        if (tex.a < 0.01) discard;
 
-  const material =
-    new THREE.ShaderMaterial({
+        float position = vUv.x * 0.90 + vUv.y * 0.20;
+        float d = abs(position - progress);
+        float glow = 1.0 - smoothstep(0.0, width, d);
 
-      transparent: true,
+        glow *= strength;
 
-      depthWrite: false,
+        gl_FragColor = vec4(vec3(1.0), tex.a * glow);
 
-      blending:
-        THREE.AdditiveBlending,
+        #include <colorspace_fragment>
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
 
-      uniforms: {
-
-        uTexture: {
-          value: texture
-        },
-
-        uTime: {
-          value: 0
-        },
-
-        uOpacity: {
-          value: 0
-        }
-      },
-
-      vertexShader: `
-
-        varying vec2 vUv;
-
-        void main() {
-
-          vUv = uv;
-
-          gl_Position =
-            projectionMatrix *
-            modelViewMatrix *
-            vec4(position, 1.0);
-        }
-      `,
-
-      fragmentShader: `
-
-        uniform sampler2D uTexture;
-        uniform float uTime;
-        uniform float uOpacity;
-
-        varying vec2 vUv;
-
-        void main() {
-
-          vec4 tex =
-            texture2D(
-              uTexture,
-              vUv
-            );
-
-          float cycle =
-            mod(uTime, 5.2);
-
-          float sweep1 =
-            smoothstep(
-              0.0,
-              0.12,
-              cycle
-            )
-            *
-            (
-              1.0 -
-              smoothstep(
-                0.12,
-                2.05,
-                cycle
-              )
-            );
-
-          float sweep2 =
-            smoothstep(
-              0.0,
-              0.12,
-              cycle - 2.65
-            )
-            *
-            (
-              1.0 -
-              smoothstep(
-                0.12,
-                2.10,
-                cycle - 2.65
-              )
-            );
-
-          float x1 =
-            cycle / 2.05;
-
-          float x2 =
-            (cycle - 2.65) / 2.10;
-
-          float band1 =
-            exp(
-              -pow(
-                (vUv.x - x1) / 0.055,
-                2.0
-              )
-            );
-
-          float band2 =
-            exp(
-              -pow(
-                (vUv.x - x2) / 0.055,
-                2.0
-              )
-            );
-
-          float shine =
-            max(
-              band1 * sweep1,
-              band2 * sweep2
-            );
-
-          shine *= tex.a;
-          shine *= uOpacity;
-
-          vec3 light =
-            vec3(
-              1.0,
-              0.92,
-              0.68
-            );
-
-          gl_FragColor =
-            vec4(
-              light,
-              shine
-            );
-        }
-      `
-    });
-
-  return new THREE.Mesh(
-    new THREE.PlaneGeometry(
-      1,
-      1.5
-    ),
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1.5),
     material
   );
-}
 
-
-// ============================================================
-// OLA DORADA DEL REVELADO
-// ============================================================
-
-function createRevealWave() {
-
-  const material =
-    new THREE.ShaderMaterial({
-
-      transparent: true,
-
-      depthWrite: false,
-
-      blending:
-        THREE.AdditiveBlending,
-
-      uniforms: {
-
-        uTime: {
-          value: 0
-        },
-
-        uProgress: {
-          value: 0
-        },
-
-        uOpacity: {
-          value: 0
-        }
-      },
-
-      vertexShader: `
-
-        varying vec2 vUv;
-
-        void main() {
-
-          vUv = uv;
-
-          gl_Position =
-            projectionMatrix *
-            modelViewMatrix *
-            vec4(position, 1.0);
-        }
-      `,
-
-      fragmentShader: `
-
-        uniform float uTime;
-        uniform float uProgress;
-        uniform float uOpacity;
-
-        varying vec2 vUv;
-
-        void main() {
-
-          float waveY =
-            1.0 - uProgress;
-
-          float organic =
-            sin(
-              vUv.x * 11.0 +
-              uTime * 1.7
-            ) * 0.018;
-
-          organic +=
-            sin(
-              vUv.x * 23.0 -
-              uTime * 2.1
-            ) * 0.009;
-
-          float distanceFromWave =
-            abs(
-              vUv.y -
-              waveY -
-              organic
-            );
-
-          float glow =
-            smoothstep(
-              0.09,
-              0.0,
-              distanceFromWave
-            );
-
-          glow *=
-            smoothstep(
-              0.0,
-              0.10,
-              uProgress
-            );
-
-          glow *=
-            1.0 -
-            smoothstep(
-              0.92,
-              1.0,
-              uProgress
-            );
-
-          vec3 warm =
-            mix(
-              vec3(
-                1.0,
-                0.62,
-                0.16
-              ),
-              vec3(
-                1.0,
-                0.92,
-                0.55
-              ),
-              uProgress
-            );
-
-          gl_FragColor =
-            vec4(
-              warm,
-              glow * uOpacity
-            );
-        }
-      `
-    });
-
-  const mesh =
-    new THREE.Mesh(
-      new THREE.PlaneGeometry(
-        1.02,
-        1.52
-      ),
-      material
-    );
-
-  mesh.position.z =
-    0.018;
+  mesh.position.copy(position);
+  mesh.renderOrder = renderOrder;
 
   return mesh;
 }
 
+function createPulseGlow(texture, position, renderOrder) {
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
 
-// ============================================================
-// BOTÓN
-// ============================================================
-
-function createFlipButton() {
-
-  flipButton =
-    document.createElement("button");
-
-  flipButton.textContent =
-    "Ver reverso";
-
-  Object.assign(
-    flipButton.style,
-    {
-      position: "fixed",
-      right: "18px",
-      top: "50%",
-      transform:
-        "translateY(-50%)",
-      zIndex: "9999",
-      display: "none",
-      border: "0",
-      padding: "12px 14px",
-      borderRadius: "18px",
-      background:
-        "rgba(190,165,216,0.94)",
-      color: "#fffaf2",
-      fontFamily:
-        "'Comic Sans MS', 'Trebuchet MS', sans-serif",
-      fontSize: "14px",
-      fontWeight: "600",
-      boxShadow:
-        "0 5px 18px rgba(80,50,90,0.20)",
-      cursor: "pointer",
-      WebkitTapHighlightColor:
-        "transparent"
-    }
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1.5),
+    material
   );
 
-  flipButton.addEventListener(
-    "click",
-    () => {
+  mesh.position.copy(position);
+  mesh.renderOrder = renderOrder;
 
-      if (flipState === "front") {
+  return mesh;
+}
 
-        startFlip(
-          0,
-          Math.PI
-        );
+function createRevealWave(position, renderOrder) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      progress: { value: -1 },
+      intensity: { value: 0 },
+      width: { value: 0.055 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
 
-      } else if (
-        flipState === "back"
-      ) {
-
-        startFlip(
-          Math.PI,
-          0
-        );
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
-    }
-  );
+    `,
+    fragmentShader: `
+      uniform float progress;
+      uniform float intensity;
+      uniform float width;
 
-  document.body.appendChild(
-    flipButton
-  );
-}
+      varying vec2 vUv;
 
+      void main() {
+        float band = abs(vUv.y - progress);
 
-// ============================================================
-// MAGIA DEL GIRO
-// ============================================================
-
-function createFlipMagic() {
-
-  const group =
-    new THREE.Group();
-
-  for (
-    let i = 0;
-    i < 46;
-    i++
-  ) {
-
-    const geometry =
-      new THREE.SphereGeometry(
-        0.006 +
-          Math.random() * 0.007,
-        6,
-        6
-      );
-
-    const material =
-      new THREE.MeshBasicMaterial({
-
-        color:
-          0xffd978,
-
-        transparent: true,
-
-        opacity: 0,
-
-        blending:
-          THREE.AdditiveBlending,
-
-        depthWrite: false
-      });
-
-    const particle =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-    particle.userData = {
-
-      angle:
-        Math.random() *
-        Math.PI *
-        2,
-
-      radius:
-        0.03 +
-        Math.random() *
-        0.34,
-
-      speed:
-        0.8 +
-        Math.random() *
-        1.8,
-
-      height:
-        (
-          Math.random() -
-          0.5
-        ) * 0.45
-    };
-
-    group.add(
-      particle
-    );
-  }
-
-  const flash =
-    new THREE.Mesh(
-
-      new THREE.PlaneGeometry(
-        0.55,
-        0.82
-      ),
-
-      new THREE.MeshBasicMaterial({
-
-        color:
-          0xffefb0,
-
-        transparent: true,
-
-        opacity: 0,
-
-        blending:
-          THREE.AdditiveBlending,
-
-        depthWrite: false
-      })
-    );
-
-  flash.position.z =
-    0.025;
-
-  group.add(
-    flash
-  );
-
-  group.visible =
-    false;
-
-  return group;
-}
-
-
-// ============================================================
-// FLIP
-// ============================================================
-
-function startFlip(
-  from,
-  to
-) {
-
-  if (
-    flipState === "flipping" ||
-    !targetVisible
-  ) {
-    return;
-  }
-
-  flipState =
-    "flipping";
-
-  flipStartTime =
-    performance.now() /
-    1000;
-
-  flipFrom =
-    from;
-
-  flipTo =
-    to;
-
-  flipContainer.rotation.y =
-    from;
-
-  if (flipButton) {
-    flipButton.style.display =
-      "none";
-  }
-
-  if (flipMagic) {
-
-    flipMagic.visible =
-      true;
-
-    flipMagic.children.forEach(
-      (child) => {
-
-        if (child.material) {
-          child.material.opacity =
-            0;
-        }
-      }
-    );
-  }
-}
-
-
-function updateFlip(time) {
-
-  if (
-    flipState !== "flipping"
-  ) {
-    return;
-  }
-
-  const progress =
-    clamp(
-      (
-        time -
-        flipStartTime
-      ) /
-      FLIP_DURATION,
-      0,
-      1
-    );
-
-  const eased =
-    ease(progress);
-
-  flipContainer.rotation.y =
-    THREE.MathUtils.lerp(
-      flipFrom,
-      flipTo,
-      eased
-    );
-
-  const facing =
-    Math.cos(
-      flipContainer.rotation.y
-    );
-
-  frontGroup.visible =
-    facing >= 0;
-
-  backGroup.visible =
-    facing < 0;
-
-  if (flipMagic) {
-
-    const burst =
-      Math.sin(
-        progress *
-        Math.PI
-      );
-
-    flipMagic.children.forEach(
-      (child, index) => {
-
-        if (
-          index ===
-          flipMagic.children.length - 1
-        ) {
-
-          child.material.opacity =
-            burst *
-            burst *
-            0.75;
-
-          child.scale.setScalar(
-            0.75 +
-            burst *
-            1.6
+        float core =
+          1.0 - smoothstep(
+            0.0,
+            width,
+            band
           );
 
-          return;
-        }
+        float halo =
+          1.0 - smoothstep(
+            0.0,
+            width * 3.8,
+            band
+          );
 
-        const data =
-          child.userData;
+        float sideFade =
+          0.75 +
+          0.25 * sin(
+            vUv.x * 3.14159265
+          );
 
-        const angle =
-          data.angle +
-          time *
-          data.speed;
-
-        const radius =
-          data.radius *
+        float alpha =
           (
-            0.35 +
-            burst *
-            1.15
+            core * 0.62 +
+            halo * 0.20
+          ) *
+          intensity *
+          sideFade;
+
+        gl_FragColor =
+          vec4(
+            vec3(1.0),
+            alpha
           );
 
-        child.position.x =
-          Math.cos(angle) *
-          radius;
-
-        child.position.y =
-          Math.sin(angle) *
-            radius +
-          data.height *
-            burst;
-
-        child.position.z =
-          0.02 +
-          Math.sin(
-            angle * 1.7
-          ) *
-          0.03;
-
-        child.material.opacity =
-          burst *
-          0.85;
+        #include <colorspace_fragment>
       }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1.5),
+    material
+  );
+
+  mesh.position.copy(position);
+  mesh.renderOrder = renderOrder;
+
+  return mesh;
+}
+
+function createCrossHalo(position, renderOrder) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      intensity: { value: 0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+
+        gl_Position =
+          projectionMatrix *
+          modelViewMatrix *
+          vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float intensity;
+      varying vec2 vUv;
+
+      void main() {
+        vec2 p =
+          vUv -
+          vec2(0.5, 0.91);
+
+        p.x *= 1.18;
+
+        float d = length(p);
+
+        float glow =
+          exp(-d * 18.0);
+
+        float outer =
+          exp(-d * 7.0);
+
+        float alpha =
+          (
+            glow * 0.72 +
+            outer * 0.12
+          ) *
+          intensity;
+
+        gl_FragColor =
+          vec4(
+            vec3(1.0),
+            alpha
+          );
+
+        #include <colorspace_fragment>
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1.5),
+    material
+  );
+
+  mesh.position.copy(position);
+  mesh.renderOrder = renderOrder;
+
+  return mesh;
+}
+
+function doubleBeat(
+  time,
+  period = 4.2,
+  phase = 0
+) {
+  let t =
+    (
+      (time + phase) %
+      period +
+      period
+    ) %
+    period;
+
+  const beat1 =
+    Math.exp(
+      -Math.pow(
+        (t - 0.32) / 0.11,
+        2
+      )
     );
-  }
 
-  if (progress >= 1) {
-    finishFlip();
-  }
+  const beat2 =
+    Math.exp(
+      -Math.pow(
+        (t - 0.58) / 0.13,
+        2
+      )
+    ) * 0.62;
+
+  return clamp01(
+    beat1 + beat2
+  );
 }
-
-
-function finishFlip() {
-
-  flipContainer.rotation.y =
-    flipTo;
-
-  const showingFront =
-    flipTo === 0;
-
-  flipState =
-    showingFront
-      ? "front"
-      : "back";
-
-  frontGroup.visible =
-    showingFront;
-
-  backGroup.visible =
-    !showingFront;
-
-  if (flipButton) {
-
-    flipButton.textContent =
-      showingFront
-        ? "Ver reverso"
-        : "Volver al frente";
-
-    if (targetVisible) {
-      flipButton.style.display =
-        "block";
-    }
-  }
-
-  if (flipMagic) {
-    flipMagic.visible =
-      false;
-  }
-}
-
-
-// ============================================================
-// AR
-// ============================================================
 
 async function startAR() {
+  startButton.disabled = true;
+  startButton.textContent = "Abriendo cámara…";
 
-  if (mindarThree) {
-    return;
-  }
+  try {
+    mindarThree =
+      new MindARThree({
+        container:
+          document.querySelector(
+            "#ar-container"
+          ),
 
-  if (startButton) {
-    startButton.disabled =
-      true;
-  }
+        imageTargetSrc:
+          "./targets/estampita.mind",
 
-  setStatus(
-    "Activando cámara…"
-  );
+        maxTrack: 1,
 
-  mindarThree =
-    new MindARThree({
+        filterMinCF:
+          0.0005,
 
-      container:
-        document.body,
+        filterBeta:
+          1000,
 
-      imageTargetSrc:
-        "./targets/estampita.mind",
+        warmupTolerance:
+          5,
 
-      filterMinCF:
-        0.0005,
+        missTolerance:
+          8,
 
-      filterBeta:
-        1000,
+        uiLoading: "no",
+        uiScanning: "no",
+        uiError: "no"
+      });
 
-      warmupTolerance:
-        5,
+    const {
+      renderer,
+      scene,
+      camera
+    } = mindarThree;
 
-      missTolerance:
-        8
-    });
-
-  const {
-    renderer,
-    scene,
-    camera
-  } = mindarThree;
-
-  renderer.setPixelRatio(
-    Math.min(
-      window.devicePixelRatio ||
-        1,
-      2
-    )
-  );
-
-  renderer.setSize(
-    window.innerWidth,
-    window.innerHeight
-  );
-
-  renderer.outputColorSpace =
-    THREE.SRGBColorSpace;
-
-
-  // ==========================================================
-  // ABRIR CÁMARA INMEDIATAMENTE
-  // ==========================================================
-
-  await mindarThree.start();
-
-  if (startScreen) {
-    startScreen.style.display =
-      "none";
-  }
-
-  setStatus(
-    "Preparando la estampita…"
-  );
-
-
-  // ==========================================================
-  // ESTRUCTURA
-  // ==========================================================
-
-  stabilizedGroup =
-    new THREE.Group();
-
-  scene.add(
-    stabilizedGroup
-  );
-
-  flipContainer =
-    new THREE.Group();
-
-  stabilizedGroup.add(
-    flipContainer
-  );
-
-  frontGroup =
-    new THREE.Group();
-
-  backGroup =
-    new THREE.Group();
-
-  flipContainer.add(
-    frontGroup
-  );
-
-  flipContainer.add(
-    backGroup
-  );
-
-  backGroup.rotation.y =
-    Math.PI;
-
-  backGroup.visible =
-    false;
-
-
-  // ==========================================================
-  // TARGET
-  // ==========================================================
-
-  const anchor =
-    mindarThree.addAnchor(0);
-
-
-  // ==========================================================
-  // TEXTURAS
-  // ==========================================================
-
-  const textureLoader =
-    new THREE.TextureLoader();
-
-  const layerNames = [
-
-    "fondo-limpio.png",
-    "marco-corazones.png",
-
-    "nena-cuerpo.png",
-    "nena-cara.png",
-    "nena-pelo.png",
-    "nena-corona.png",
-    "nena-flores.png",
-
-    "texto-comunion.png",
-    "texto-jesus.png",
-
-    "cruz.png",
-    "destellos.png",
-    "estrellas.png",
-    "corazones.png",
-
-    "corazon-superior.png",
-    "corazon-inferior.png",
-
-    "gatito-superior.png",
-    "gatito-inferior.png",
-
-    "pincelada-lila.png"
-  ];
-
-  const textures = {};
-
-  for (
-    const name of layerNames
-  ) {
-
-    textures[name] =
-      await new Promise(
-        (
-          resolve,
-          reject
-        ) => {
-
-          textureLoader.load(
-
-            `./assets/animation/${name}`,
-
-            (texture) => {
-
-              texture.colorSpace =
-                THREE.SRGBColorSpace;
-
-              texture.minFilter =
-                THREE.LinearFilter;
-
-              texture.magFilter =
-                THREE.LinearFilter;
-
-              texture.generateMipmaps =
-                false;
-
-              resolve(texture);
-            },
-
-            undefined,
-
-            reject
-          );
-        }
-      );
-  }
-
-
-  // ==========================================================
-  // FRENTE
-  // ==========================================================
-
-  const geometry =
-    new THREE.PlaneGeometry(
-      1,
-      1.5
+    renderer.setPixelRatio(
+      Math.min(
+        window.devicePixelRatio,
+        2
+      )
     );
 
-  layerMeshes = [];
+    renderer.outputColorSpace =
+      THREE.SRGBColorSpace;
 
-  layerNames.forEach(
-    (name, index) => {
+    const anchor =
+      mindarThree.addAnchor(0);
+
+    const stabilizedGroup =
+      new THREE.Group();
+
+    scene.add(
+      stabilizedGroup
+    );
+
+    stabilizedGroup.visible =
+      false;
+
+    const textureLoader =
+      new THREE.TextureLoader();
+
+    const layers = [
+      {
+        file: "fondo-limpio.png",
+        order: 0
+      },
+
+      {
+        file: "texto-jesus.png",
+        order: 1
+      },
+
+      {
+        file: "pincelada-lila.png",
+        order: 2
+      },
+
+      {
+        file: "texto-comunion.png",
+        order: 3
+      },
+
+      {
+        file: "corazon-inferior.png",
+        order: 4
+      },
+
+      {
+        file: "corazon-superior.png",
+        order: 5
+      },
+
+      {
+        file: "cruz.png",
+        order: 6
+      },
+
+      {
+        file: "nena-cuerpo.png",
+        order: 10
+      },
+
+      {
+        file: "nena-flores.png",
+        order: 11
+      },
+
+      {
+        file: "nena-cara.png",
+        order: 12
+      },
+
+      {
+        file: "nena-pelo.png",
+        order: 13
+      },
+
+      {
+        file: "nena-corona.png",
+        order: 14
+      },
+
+      {
+        file: "gatito-superior.png",
+        order: 20
+      },
+
+      {
+        file: "gatito-inferior.png",
+        order: 21
+      },
+
+      {
+        file: "corazones.png",
+        order: 30
+      },
+
+      {
+        file: "estrellas.png",
+        order: 31
+      },
+
+      {
+        file: "destellos.png",
+        order: 32
+      },
+
+      {
+        file: "marco-corazones.png",
+        order: 40
+      }
+    ];
+
+    for (const layer of layers) {
+      let texture;
+
+      try {
+        texture =
+          await textureLoader.loadAsync(
+            `./assets/animation/${layer.file}`
+          );
+      } catch (error) {
+        alert(
+          "NO SE PUDO CARGAR: " +
+          layer.file
+        );
+
+        throw error;
+      }
+
+      texture.colorSpace =
+        THREE.SRGBColorSpace;
 
       const material =
         new THREE.MeshBasicMaterial({
-
-          map:
-            textures[name],
-
-          transparent:
-            true,
-
-          opacity:
-            1,
-
-          depthWrite:
-            false,
-
-          side:
-            THREE.DoubleSide
+          map: texture,
+          transparent: true,
+          alphaTest: 0.01,
+          depthTest: false,
+          depthWrite: false,
+          opacity: 1
         });
 
       applyRevealMask(
@@ -1094,330 +518,269 @@ async function startAR() {
 
       const mesh =
         new THREE.Mesh(
-          geometry,
+          new THREE.PlaneGeometry(
+            1,
+            1.5
+          ),
           material
         );
 
-      mesh.position.z =
-        index * 0.0005;
-
-      mesh.userData.layerName =
-        name;
-
-      frontGroup.add(
-        mesh
+      mesh.position.copy(
+        commonPosition
       );
 
-      layerMeshes.push(
+      mesh.renderOrder =
+        layer.order;
+
+      layerMeshes[layer.file] =
+        mesh;
+
+      stabilizedGroup.add(
         mesh
       );
     }
-  );
 
+    glowMeshes[
+      "texto-jesus.png"
+    ] =
+      createSweepGlow(
+        layerMeshes[
+          "texto-jesus.png"
+        ].material.map,
 
-  // ==========================================================
-  // REVERSO
-  // ==========================================================
+        commonPosition,
 
-  const backMaterial =
-    new THREE.MeshBasicMaterial({
+        1.5
+      );
 
-      map:
-        textures[
-          "fondo-limpio.png"
-        ],
-
-      transparent:
-        true,
-
-      opacity:
-        1,
-
-      side:
-        THREE.DoubleSide,
-
-      depthWrite:
-        false
-    });
-
-  const backMesh =
-    new THREE.Mesh(
-      geometry,
-      backMaterial
-    );
-
-  backMesh.position.z =
-    -0.002;
-
-  backGroup.add(
-    backMesh
-  );
-
-
-  // ==========================================================
-  // OLA
-  // ==========================================================
-
-  const revealWave =
-    createRevealWave();
-
-  frontGroup.add(
-    revealWave
-  );
-
-
-  // ==========================================================
-  // HALO CRUZ
-  // ==========================================================
-
-  const crossHalo =
-    new THREE.Mesh(
-
-      new THREE.PlaneGeometry(
-        0.36,
-        0.50
-      ),
-
-      new THREE.MeshBasicMaterial({
-
-        transparent:
-          true,
-
-        opacity:
-          0,
-
-        color:
-          0xffe5a1,
-
-        blending:
-          THREE.AdditiveBlending,
-
-        depthWrite:
-          false
-      })
-    );
-
-  crossHalo.position.set(
-    0,
-    0.15,
-    0.012
-  );
-
-  frontGroup.add(
-    crossHalo
-  );
-
-
-  // ==========================================================
-  // BRILLOS TEXTOS
-  // ==========================================================
-
-  const comunionSweep =
-    createSweepGlow(
-      textures[
-        "texto-comunion.png"
-      ]
-    );
-
-  comunionSweep.position.z =
-    0.020;
-
-  frontGroup.add(
-    comunionSweep
-  );
-
-
-  const jesusSweep =
-    createSweepGlow(
-      textures[
+    stabilizedGroup.add(
+      glowMeshes[
         "texto-jesus.png"
       ]
     );
 
-  jesusSweep.position.z =
-    0.021;
+    glowMeshes[
+      "texto-comunion.png"
+    ] =
+      createSweepGlow(
+        layerMeshes[
+          "texto-comunion.png"
+        ].material.map,
 
-  frontGroup.add(
-    jesusSweep
-  );
+        commonPosition,
 
-
-  // ==========================================================
-  // FLIP
-  // ==========================================================
-
-  flipMagic =
-    createFlipMagic();
-
-  flipContainer.add(
-    flipMagic
-  );
-
-  createFlipButton();
-
-
-  // ==========================================================
-  // ESTABILIZADOR
-  // ==========================================================
-
-  let stabilizerReady =
-    false;
-
-  let foundAt =
-    null;
-
-  const rawPosition =
-    new THREE.Vector3();
-
-  const rawQuaternion =
-    new THREE.Quaternion();
-
-  const rawScale =
-    new THREE.Vector3();
-
-  const smoothQuaternion =
-    new THREE.Quaternion();
-
-
-  // ==========================================================
-  // TARGET FOUND
-  // ==========================================================
-
-  anchor.onTargetFound =
-    () => {
-
-      targetVisible =
-        true;
-
-      foundAt =
-        performance.now() /
-        1000;
-
-      flipState =
-        "front";
-
-      flipContainer.rotation.set(
-        0,
-        0,
-        0
+        3.5
       );
 
-      frontGroup.visible =
-        true;
-
-      backGroup.visible =
-        false;
-
-      if (flipButton) {
-        flipButton.style.display =
-          "none";
-      }
-
-
-      // Reiniciar revelado
-      revealMaterials.forEach(
-        (material) => {
-
-          const uniforms =
-            material.userData
-              .revealUniforms;
-
-          uniforms.revealProgress.value =
-            REVEAL_INITIAL;
-
-          uniforms.revealGlow.value =
-            0;
-        }
-      );
-
-      setStatus(
-        "¡La estampita cobró vida!"
-      );
-    };
-
-
-  // ==========================================================
-  // TARGET LOST
-  // ==========================================================
-
-  anchor.onTargetLost =
-    () => {
-
-      targetVisible =
-        false;
-
-      stabilizerReady =
-        false;
-
-      foundAt =
-        null;
-
-      flipState =
-        "front";
-
-      flipContainer.rotation.set(
-        0,
-        0,
-        0
-      );
-
-      frontGroup.visible =
-        true;
-
-      backGroup.visible =
-        false;
-
-      if (flipButton) {
-        flipButton.style.display =
-          "none";
-      }
-
-      if (flipMagic) {
-        flipMagic.visible =
-          false;
-      }
-
-      setStatus(
-        "Apuntá nuevamente a la estampita"
-      );
-    };
-
-
-  // ==========================================================
-  // RENDER
-  // ==========================================================
-
-  const clock =
-    new THREE.Clock();
-
-  const startTime =
-    performance.now() /
-    1000;
-
-
-  function animate() {
-
-    requestAnimationFrame(
-      animate
+    stabilizedGroup.add(
+      glowMeshes[
+        "texto-comunion.png"
+      ]
     );
 
-    const time =
-      performance.now() /
-      1000;
+    glowMeshes[
+      "cruz.png"
+    ] =
+      createPulseGlow(
+        layerMeshes[
+          "cruz.png"
+        ].material.map,
 
-    const dt =
-      Math.min(
-        clock.getDelta(),
-        0.05
+        commonPosition,
+
+        6.5
       );
 
+    stabilizedGroup.add(
+      glowMeshes[
+        "cruz.png"
+      ]
+    );
 
-    // --------------------------------------------------------
-    // TRACKING
-    // --------------------------------------------------------
+    glowMeshes[
+      "corazon-superior.png"
+    ] =
+      createPulseGlow(
+        layerMeshes[
+          "corazon-superior.png"
+        ].material.map,
 
-    if (targetVisible) {
+        commonPosition,
 
+        5.5
+      );
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazon-superior.png"
+      ]
+    );
+
+    glowMeshes[
+      "corazon-inferior.png"
+    ] =
+      createPulseGlow(
+        layerMeshes[
+          "corazon-inferior.png"
+        ].material.map,
+
+        commonPosition,
+
+        4.5
+      );
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazon-inferior.png"
+      ]
+    );
+
+    glowMeshes[
+      "corazones.png"
+    ] =
+      createPulseGlow(
+        layerMeshes[
+          "corazones.png"
+        ].material.map,
+
+        commonPosition,
+
+        30.5
+      );
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "corazones.png"
+      ]
+    );
+
+    glowMeshes[
+      "destellos.png"
+    ] =
+      createPulseGlow(
+        layerMeshes[
+          "destellos.png"
+        ].material.map,
+
+        commonPosition,
+
+        32.5
+      );
+
+    stabilizedGroup.add(
+      glowMeshes[
+        "destellos.png"
+      ]
+    );
+
+    const revealWave =
+      createRevealWave(
+        commonPosition,
+        45
+      );
+
+    stabilizedGroup.add(
+      revealWave
+    );
+
+    const crossHalo =
+      createCrossHalo(
+        commonPosition,
+        6.4
+      );
+
+    stabilizedGroup.add(
+      crossHalo
+    );
+
+    for (
+      const file of Object.keys(
+        layerMeshes
+      )
+    ) {
+      layerMeshes[
+        file
+      ].material.opacity = 0;
+    }
+
+    for (
+      const file of Object.keys(
+        glowMeshes
+      )
+    ) {
+      glowMeshes[
+        file
+      ].material.opacity = 0;
+    }
+
+    [
+      "fondo-limpio.png",
+      "texto-jesus.png",
+      "pincelada-lila.png",
+      "texto-comunion.png",
+      "corazon-inferior.png",
+      "corazon-superior.png",
+      "cruz.png",
+      "nena-cuerpo.png",
+      "nena-flores.png",
+      "nena-cara.png",
+      "corazones.png",
+      "estrellas.png",
+      "destellos.png",
+      "marco-corazones.png"
+    ].forEach(
+      (file) => {
+        if (
+          layerMeshes[file]
+        ) {
+          layerMeshes[
+            file
+          ].position.copy(
+            commonPosition
+          );
+        }
+      }
+    );
+
+    revealWave
+      .material
+      .uniforms
+      .progress.value = -1;
+
+    revealWave
+      .material
+      .uniforms
+      .intensity.value = 0;
+
+    crossHalo
+      .material
+      .uniforms
+      .intensity.value = 0;
+
+    const rawPosition =
+      new THREE.Vector3();
+
+    const rawQuaternion =
+      new THREE.Quaternion();
+
+    const rawScale =
+      new THREE.Vector3();
+
+    let stabilizerReady =
+      false;
+
+    const POSITION_RESPONSE =
+      9;
+
+    const ROTATION_RESPONSE =
+      11;
+
+    const SCALE_RESPONSE =
+      9;
+
+    function updateTrackingStabilizer(
+      delta
+    ) {
       anchor.group.updateMatrixWorld(
         true
       );
@@ -1428,8 +791,9 @@ async function startAR() {
         rawScale
       );
 
-      if (!stabilizerReady) {
-
+      if (
+        !stabilizerReady
+      ) {
         stabilizedGroup.position.copy(
           rawPosition
         );
@@ -1442,431 +806,979 @@ async function startAR() {
           rawScale
         );
 
-        smoothQuaternion.copy(
-          rawQuaternion
-        );
-
         stabilizerReady =
           true;
 
-      } else {
-
-        stabilizedGroup.position.lerp(
-          rawPosition,
-          smoothFactor(
-            POSITION_RESPONSE,
-            dt
-          )
-        );
-
-        smoothQuaternion.slerp(
-          rawQuaternion,
-          smoothFactor(
-            ROTATION_RESPONSE,
-            dt
-          )
-        );
-
-        stabilizedGroup.quaternion.copy(
-          smoothQuaternion
-        );
-
-        stabilizedGroup.scale.lerp(
-          rawScale,
-          smoothFactor(
-            SCALE_RESPONSE,
-            dt
-          )
-        );
-      }
-    }
-
-
-    // --------------------------------------------------------
-    // REVELADO
-    // --------------------------------------------------------
-
-    let revealProgress =
-      1.05;
-
-    if (
-      targetVisible &&
-      foundAt !== null
-    ) {
-
-      const elapsed =
-        time -
-        foundAt;
-
-      revealProgress =
-        clamp(
-
-          (
-            elapsed -
-            REVEAL_START
-          ) /
-          REVEAL_DURATION,
-
-          REVEAL_INITIAL,
-
-          1.08
-        );
-    }
-
-
-    revealMaterials.forEach(
-      (material) => {
-
-        const uniforms =
-          material.userData
-            .revealUniforms;
-
-        uniforms.revealProgress.value =
-          revealProgress;
-
-        if (
-          revealProgress >=
-            REVEAL_INITIAL &&
-          revealProgress <= 1
-        ) {
-
-          uniforms.revealGlow.value =
-            Math.sin(
-
-              clamp(
-                (
-                  revealProgress -
-                  REVEAL_INITIAL
-                ) / 1.08,
-
-                0,
-                1
-              ) * Math.PI
-
-            ) * 0.72;
-
-        } else {
-
-          uniforms.revealGlow.value =
-            0;
-        }
-      }
-    );
-
-
-    // --------------------------------------------------------
-    // ANIMACIONES DEL FRENTE
-    // --------------------------------------------------------
-
-    if (
-      flipState ===
-      "front"
-    ) {
-
-      const findLayer =
-        (name) =>
-          layerMeshes.find(
-            (mesh) =>
-              mesh.userData
-                .layerName ===
-              name
-          );
-
-
-      // Pelo
-
-      const hair =
-        findLayer(
-          "nena-pelo.png"
-        );
-
-      if (hair) {
-
-        hair.position.x =
-          Math.sin(
-            time * 1.2
-          ) * 0.004;
-
-        hair.position.y =
-          Math.sin(
-            time * 1.5
-          ) * 0.002;
+        return;
       }
 
-
-      // Corona
-
-      const crown =
-        findLayer(
-          "nena-corona.png"
+      const positionAlpha =
+        1 -
+        Math.exp(
+          -POSITION_RESPONSE *
+          delta
         );
 
-      if (crown) {
-
-        crown.position.x =
-          Math.sin(
-            time * 1.2 +
-            0.3
-          ) * 0.003;
-
-        crown.position.y =
-          Math.sin(
-            time * 1.5 +
-            0.3
-          ) * 0.0015;
-
-        crown.rotation.z =
-          Math.sin(
-            time * 1.1
-          ) * 0.008;
-      }
-
-
-      // Gatito superior
-
-      const catTop =
-        findLayer(
-          "gatito-superior.png"
+      const rotationAlpha =
+        1 -
+        Math.exp(
+          -ROTATION_RESPONSE *
+          delta
         );
 
-      if (catTop) {
-
-        catTop.position.x =
-          Math.sin(
-            time * 0.75 +
-            1.5
-          ) * 0.003;
-
-        catTop.position.y =
-          Math.sin(
-            time +
-            0.5
-          ) * 0.004;
-      }
-
-
-      // Gatito inferior
-
-      const catBottom =
-        findLayer(
-          "gatito-inferior.png"
+      const scaleAlpha =
+        1 -
+        Math.exp(
+          -SCALE_RESPONSE *
+          delta
         );
 
-      if (catBottom) {
+      stabilizedGroup.position.lerp(
+        rawPosition,
+        positionAlpha
+      );
 
-        catBottom.position.x =
-          Math.sin(
-            time * 0.65 +
-            3.0
-          ) * 0.0025;
+      stabilizedGroup.quaternion.slerp(
+        rawQuaternion,
+        rotationAlpha
+      );
 
-        catBottom.position.y =
-          Math.sin(
-            time * 0.9 +
-            2.0
-          ) * 0.0035;
-      }
-
-
-      // ------------------------------------------------------
-      // BRILLO TEXTOS
-      // ------------------------------------------------------
-
-      const animationTime =
-        time -
-        startTime;
-
-      comunionSweep
-        .material
-        .uniforms
-        .uTime
-        .value =
-        animationTime;
-
-      comunionSweep
-        .material
-        .uniforms
-        .uOpacity
-        .value =
-        targetVisible
-          ? 0.92
-          : 0;
-
-
-      jesusSweep
-        .material
-        .uniforms
-        .uTime
-        .value =
-        animationTime;
-
-      jesusSweep
-        .material
-        .uniforms
-        .uOpacity
-        .value =
-        targetVisible
-          ? 0.82
-          : 0;
-
-
-      // ------------------------------------------------------
-      // OLA DORADA
-      // ------------------------------------------------------
-
-      revealWave
-        .material
-        .uniforms
-        .uTime
-        .value =
-        time;
-
-      revealWave
-        .material
-        .uniforms
-        .uProgress
-        .value =
-        clamp(
-          revealProgress,
-          0,
-          1
-        );
-
-      revealWave
-        .material
-        .uniforms
-        .uOpacity
-        .value =
-
-        (
-          revealProgress >=
-            REVEAL_INITIAL &&
-          revealProgress <= 1
-        )
-          ? 0.95
-          : 0;
-
-
-      // ------------------------------------------------------
-      // HALO
-      // ------------------------------------------------------
-
-      if (
-        foundAt !== null
-      ) {
-
-        const sinceFound =
-          time -
-          foundAt;
-
-        crossHalo.material.opacity =
-          smoothstep01(
-            sinceFound / 1.1
-          ) *
-          (
-            0.12 +
-            Math.sin(
-              time * 1.5
-            ) * 0.035
-          );
-      }
-
-
-      // ------------------------------------------------------
-      // BOTÓN
-      // ------------------------------------------------------
-
-      if (
-        flipButton &&
-        targetVisible &&
-        flipState !==
-          "flipping" &&
-        foundAt !== null
-      ) {
-
-        const sinceFound =
-          time -
-          foundAt;
-
-        flipButton.style.display =
-          sinceFound > 4.2
-            ? "block"
-            : "none";
-      }
-    }
-
-
-    // --------------------------------------------------------
-    // FLIP
-    // --------------------------------------------------------
-
-    updateFlip(
-      time
-    );
-
-
-    renderer.render(
-      scene,
-      camera
-    );
-  }
-
-
-  animate();
-
-  setStatus(
-    "Apuntá a la estampita"
-  );
-}
-
-
-// ============================================================
-// INICIAR
-// ============================================================
-
-if (startButton) {
-
-  startButton.addEventListener(
-    "click",
-    () => {
-
-      startAR().catch(
-        (error) => {
-
-          console.error(
-            error
-          );
-
-          setStatus(
-            "No se pudo iniciar la cámara."
-          );
-
-          if (startButton) {
-            startButton.disabled =
-              false;
-          }
-        }
+      stabilizedGroup.scale.lerp(
+        rawScale,
+        scaleAlpha
       );
     }
-  );
-}
 
+    let targetFoundTime =
+      null;
 
-// ============================================================
-// RESIZE
-// ============================================================
+    let targetVisible =
+      false;
 
-window.addEventListener(
-  "resize",
-  () => {
+    anchor.onTargetFound =
+      () => {
+        targetFoundTime =
+          performance.now();
 
-    if (!mindarThree) {
-      return;
+        targetVisible =
+          true;
+
+        for (
+          const file of Object.keys(
+            layerMeshes
+          )
+        ) {
+          layerMeshes[
+            file
+          ].material.opacity = 1;
+
+          if (
+            layerMeshes[
+              file
+            ].material.userData
+              .revealUniforms
+          ) {
+            layerMeshes[
+              file
+            ].material.userData
+              .revealUniforms
+              .revealProgress
+              .value = 1.1;
+          }
+        }
+
+        revealWave
+          .material
+          .uniforms
+          .progress.value = -1;
+
+        revealWave
+          .material
+          .uniforms
+          .intensity.value = 0;
+
+        crossHalo
+          .material
+          .uniforms
+          .intensity.value = 0;
+
+        status.textContent =
+          "¡La estampita cobró vida!";
+
+        status.classList.remove(
+          "hidden"
+        );
+      };
+
+    anchor.onTargetLost =
+      () => {
+        targetFoundTime =
+          null;
+
+        targetVisible =
+          false;
+
+        stabilizerReady =
+          false;
+
+        stabilizedGroup.visible =
+          false;
+
+        for (
+          const file of Object.keys(
+            layerMeshes
+          )
+        ) {
+          layerMeshes[
+            file
+          ].material.opacity = 0;
+        }
+
+        for (
+          const file of Object.keys(
+            glowMeshes
+          )
+        ) {
+          glowMeshes[
+            file
+          ].material.opacity = 0;
+        }
+
+        revealWave
+          .material
+          .uniforms
+          .progress.value = -1;
+
+        revealWave
+          .material
+          .uniforms
+          .intensity.value = 0;
+
+        crossHalo
+          .material
+          .uniforms
+          .intensity.value = 0;
+
+        status.textContent =
+          "Apuntá la cámara a la estampita";
+
+        status.classList.remove(
+          "hidden"
+        );
+      };
+
+    status.textContent =
+      "Preparando cámara…";
+
+    status.classList.remove(
+      "hidden"
+    );
+
+    await mindarThree.start();
+
+    startScreen.classList.add(
+      "hidden"
+    );
+
+    stopButton.classList.remove(
+      "hidden"
+    );
+
+    status.textContent =
+      "Apuntá la cámara a la estampita";
+
+    const clock =
+      new THREE.Clock();
+
+    renderer.setAnimationLoop(
+      () => {
+        const delta =
+          Math.min(
+            clock.getDelta(),
+            0.05
+          );
+
+        const time =
+          clock.elapsedTime;
+
+        if (
+          targetVisible
+        ) {
+          stabilizedGroup.visible =
+            true;
+
+          updateTrackingStabilizer(
+            delta
+          );
+        } else {
+          stabilizedGroup.visible =
+            false;
+
+          stabilizerReady =
+            false;
+        }
+
+        let elapsed =
+          999;
+
+        if (
+          targetFoundTime !== null
+        ) {
+          elapsed =
+            (
+              performance.now() -
+              targetFoundTime
+            ) / 1000;
+        }
+
+        if (
+          targetVisible
+        ) {
+          layerMeshes[
+            "fondo-limpio.png"
+          ].material.opacity =
+            easeOutCubic(
+              elapsed / 0.35
+            );
+
+          const girlProgress =
+            easeOutCubic(
+              (elapsed - 0.12) /
+              0.70
+            );
+
+          [
+            "nena-cuerpo.png",
+            "nena-flores.png",
+            "nena-cara.png",
+            "nena-pelo.png",
+            "nena-corona.png"
+          ].forEach(
+            (file) => {
+              layerMeshes[
+                file
+              ].material.opacity =
+                girlProgress;
+            }
+          );
+
+          const catProgress =
+            easeOutCubic(
+              (elapsed - 0.30) /
+              0.70
+            );
+
+          [
+            "gatito-superior.png",
+            "gatito-inferior.png"
+          ].forEach(
+            (file) => {
+              layerMeshes[
+                file
+              ].material.opacity =
+                catProgress;
+            }
+          );
+
+          layerMeshes[
+            "pincelada-lila.png"
+          ].material.opacity =
+            easeOutCubic(
+              (elapsed - 0.05) /
+              0.55
+            );
+
+          layerMeshes[
+            "texto-comunion.png"
+          ].material.opacity =
+            easeOutCubic(
+              (elapsed - 0.18) /
+              0.85
+            );
+
+          layerMeshes[
+            "texto-jesus.png"
+          ].material.opacity =
+            easeOutCubic(
+              (elapsed - 0.35) /
+              0.85
+            );
+
+          layerMeshes[
+            "cruz.png"
+          ].material.opacity =
+            easeOutCubic(
+              (elapsed - 0.20) /
+              0.65
+            );
+
+          const heartProgress =
+            easeOutCubic(
+              (elapsed - 0.25) /
+              0.65
+            );
+
+          layerMeshes[
+            "corazon-superior.png"
+          ].material.opacity =
+            heartProgress;
+
+          layerMeshes[
+            "corazon-inferior.png"
+          ].material.opacity =
+            heartProgress;
+
+          const decorationProgress =
+            easeOutCubic(
+              (elapsed - 0.30) /
+              0.75
+            );
+
+          [
+            "corazones.png",
+            "estrellas.png",
+            "destellos.png",
+            "marco-corazones.png"
+          ].forEach(
+            (file) => {
+              layerMeshes[
+                file
+              ].material.opacity =
+                decorationProgress;
+            }
+          );
+        }
+
+        const hair =
+          layerMeshes[
+            "nena-pelo.png"
+          ];
+
+        if (hair) {
+          hair.position.x =
+            commonPosition.x +
+            Math.sin(
+              time * 1.2
+            ) *
+            0.004;
+
+          hair.position.y =
+            commonPosition.y +
+            Math.sin(
+              time * 1.5
+            ) *
+            0.002;
+        }
+
+        const crown =
+          layerMeshes[
+            "nena-corona.png"
+          ];
+
+        if (crown) {
+          crown.position.x =
+            commonPosition.x +
+            Math.sin(
+              time * 1.2 + 0.3
+            ) *
+            0.003;
+
+          crown.position.y =
+            commonPosition.y +
+            Math.sin(
+              time * 1.5 + 0.3
+            ) *
+            0.0015;
+
+          crown.rotation.z =
+            Math.sin(
+              time * 1.1
+            ) *
+            0.008;
+        }
+
+        const catTop =
+          layerMeshes[
+            "gatito-superior.png"
+          ];
+
+        if (catTop) {
+          catTop.position.x =
+            commonPosition.x +
+            Math.sin(
+              time * 0.75 + 1.5
+            ) *
+            0.003;
+
+          catTop.position.y =
+            commonPosition.y +
+            Math.sin(
+              time * 1.0 + 0.5
+            ) *
+            0.004;
+        }
+
+        const catBottom =
+          layerMeshes[
+            "gatito-inferior.png"
+          ];
+
+        if (catBottom) {
+          catBottom.position.x =
+            commonPosition.x +
+            Math.sin(
+              time * 0.65 + 3.0
+            ) *
+            0.0025;
+
+          catBottom.position.y =
+            commonPosition.y +
+            Math.sin(
+              time * 0.9 + 2.0
+            ) *
+            0.0035;
+        }
+
+        const decorativeHearts =
+          layerMeshes[
+            "corazones.png"
+          ];
+
+        const decorativeHeartGlow =
+          glowMeshes[
+            "corazones.png"
+          ];
+
+        if (
+          decorativeHearts &&
+          decorativeHeartGlow &&
+          targetVisible
+        ) {
+          const beat =
+            doubleBeat(
+              time,
+              4.6,
+              0.4
+            );
+
+          decorativeHearts
+            .material
+            .opacity =
+            0.82 +
+            beat * 0.18;
+
+          decorativeHeartGlow
+            .material
+            .opacity =
+            beat * 0.48;
+        }
+
+        const heartTop =
+          layerMeshes[
+            "corazon-superior.png"
+          ];
+
+        const heartTopGlow =
+          glowMeshes[
+            "corazon-superior.png"
+          ];
+
+        if (
+          heartTop &&
+          heartTopGlow &&
+          targetVisible
+        ) {
+          const beat =
+            doubleBeat(
+              time,
+              4.0,
+              0
+            );
+
+          heartTop
+            .material
+            .opacity =
+            0.84 +
+            beat * 0.16;
+
+          heartTopGlow
+            .material
+            .opacity =
+            beat * 0.42;
+        }
+
+        const heartBottom =
+          layerMeshes[
+            "corazon-inferior.png"
+          ];
+
+        const heartBottomGlow =
+          glowMeshes[
+            "corazon-inferior.png"
+          ];
+
+        if (
+          heartBottom &&
+          heartBottomGlow &&
+          targetVisible
+        ) {
+          const beat =
+            doubleBeat(
+              time,
+              4.0,
+              1.8
+            );
+
+          heartBottom
+            .material
+            .opacity =
+            0.84 +
+            beat * 0.16;
+
+          heartBottomGlow
+            .material
+            .opacity =
+            beat * 0.42;
+        }
+
+        /*
+         * =====================================================
+         * REVELACIÓN WOW
+         * =====================================================
+         *
+         * La cruz es el origen.
+         * Primero se enciende, luego una onda de luz
+         * atraviesa la estampita de arriba hacia abajo.
+         */
+
+        if (
+          targetVisible
+        ) {
+          const cross =
+            layerMeshes[
+              "cruz.png"
+            ];
+
+          const crossGlow =
+            glowMeshes[
+              "cruz.png"
+            ];
+
+          let ignition =
+            0;
+
+          if (
+            elapsed >= 0.35 &&
+            elapsed < 1.30
+          ) {
+            const p =
+              (
+                elapsed - 0.35
+              ) /
+              0.95;
+
+            ignition =
+              Math.sin(
+                easeInOut(p) *
+                Math.PI
+              );
+
+          } else if (
+            elapsed >= 1.30 &&
+            elapsed < 2.10
+          ) {
+            ignition =
+              0.42 *
+              (
+                1 -
+                easeOutCubic(
+                  (
+                    elapsed -
+                    1.30
+                  ) /
+                  0.80
+                )
+              );
+          }
+
+          const ambientPulse =
+            Math.pow(
+              (
+                Math.sin(
+                  time * 0.75
+                ) +
+                1
+              ) / 2,
+              5
+            ) *
+            0.10;
+
+          if (cross) {
+            cross.material.opacity =
+              Math.max(
+                cross.material.opacity,
+                0.82 +
+                ignition * 0.18 +
+                ambientPulse
+              );
+          }
+
+          if (crossGlow) {
+            crossGlow.material.opacity =
+              Math.min(
+                1,
+                ignition * 1.15 +
+                ambientPulse * 0.5
+              );
+          }
+
+          crossHalo
+            .material
+            .uniforms
+            .intensity
+            .value =
+            Math.min(
+              1,
+              ignition * 1.25
+            );
+
+          if (
+            elapsed >= 0.50 &&
+            elapsed <= 2.15
+          ) {
+            const p =
+              (
+                elapsed -
+                0.50
+              ) /
+              1.65;
+
+            const wave =
+              easeInOut(p);
+
+            revealWave
+              .material
+              .uniforms
+              .progress
+              .value =
+              1.02 -
+              wave * 1.22;
+
+            const edge =
+              Math.sin(
+                p * Math.PI
+              );
+
+            revealWave
+              .material
+              .uniforms
+              .intensity
+              .value =
+              0.78 *
+              edge;
+
+          } else {
+            revealWave
+              .material
+              .uniforms
+              .intensity
+              .value = 0;
+          }
+        }
+
+        const sparkles =
+          layerMeshes[
+            "destellos.png"
+          ];
+
+        const sparkleGlow =
+          glowMeshes[
+            "destellos.png"
+          ];
+
+        if (
+          sparkles &&
+          sparkleGlow &&
+          targetVisible
+        ) {
+          const wave1 =
+            Math.pow(
+              (
+                Math.sin(
+                  time * 1.8
+                ) +
+                1
+              ) / 2,
+              6
+            );
+
+          const wave2 =
+            Math.pow(
+              (
+                Math.sin(
+                  time * 3.1 +
+                  1.7
+                ) +
+                1
+              ) / 2,
+              9
+            );
+
+          const wave3 =
+            Math.pow(
+              (
+                Math.sin(
+                  time * 4.7 +
+                  3.0
+                ) +
+                1
+              ) / 2,
+              12
+            );
+
+          const sparkle =
+            clamp01(
+              wave1 +
+              wave2 * 0.65 +
+              wave3 * 0.45
+            );
+
+          sparkles
+            .material
+            .opacity =
+            0.18 +
+            sparkle * 0.82;
+
+          sparkleGlow
+            .material
+            .opacity =
+            0.08 +
+            sparkle * 0.90;
+        }
+
+        const stars =
+          layerMeshes[
+            "estrellas.png"
+          ];
+
+        if (
+          stars &&
+          targetVisible
+        ) {
+          const starWave =
+            Math.pow(
+              (
+                Math.sin(
+                  time * 1.25 +
+                  0.8
+                ) +
+                1
+              ) / 2,
+              3
+            );
+
+          stars.material.opacity =
+            0.68 +
+            starWave * 0.32;
+        }
+
+        const jesusGlow =
+          glowMeshes[
+            "texto-jesus.png"
+          ];
+
+        const communionGlow =
+          glowMeshes[
+            "texto-comunion.png"
+          ];
+
+        function updateTextSweep(
+          glow,
+          startDelay,
+          cycleLength,
+          duration
+        ) {
+          if (
+            !glow ||
+            !targetVisible ||
+            elapsed < startDelay
+          ) {
+            if (glow) {
+              glow.material.opacity =
+                0;
+            }
+
+            return;
+          }
+
+          const localTime =
+            elapsed -
+            startDelay;
+
+          const cycle =
+            localTime %
+            cycleLength;
+
+          if (
+            cycle >= 0 &&
+            cycle < duration
+          ) {
+            const progress =
+              cycle /
+              duration;
+
+            glow.material
+              .uniforms
+              .progress
+              .value =
+              -0.15 +
+              progress * 1.30;
+
+            const intensity =
+              Math.sin(
+                progress *
+                Math.PI
+              );
+
+            glow.material
+              .uniforms
+              .strength
+              .value =
+              0.85 +
+              intensity * 0.65;
+
+            glow.material.opacity =
+              0.35 +
+              intensity * 0.65;
+
+          } else {
+            glow.material.opacity =
+              0;
+          }
+        }
+
+        updateTextSweep(
+          communionGlow,
+          2.05,
+          6.5,
+          1.15
+        );
+
+        updateTextSweep(
+          jesusGlow,
+          3.55,
+          6.5,
+          1.15
+        );
+
+        if (
+          targetVisible &&
+          elapsed > 0.35
+        ) {
+          layerMeshes[
+            "fondo-limpio.png"
+          ].material.opacity =
+            1;
+        }
+
+        if (
+          targetVisible &&
+          elapsed > 0.9
+        ) {
+          layerMeshes[
+            "marco-corazones.png"
+          ].material.opacity =
+            1;
+        }
+
+        renderer.render(
+          scene,
+          camera
+        );
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      "Error iniciando MindAR:",
+      error
+    );
+
+    if (mindarThree) {
+      try {
+        mindarThree.stop();
+
+        mindarThree
+          .renderer
+          .setAnimationLoop(
+            null
+          );
+      } catch (e) {}
     }
 
-    mindarThree.renderer.setSize(
-      window.innerWidth,
-      window.innerHeight
+    mindarThree =
+      null;
+
+    startButton.disabled =
+      false;
+
+    startButton.textContent =
+      "Intentar nuevamente";
+
+    status.textContent =
+      "No se pudo iniciar la cámara.";
+
+    status.classList.remove(
+      "hidden"
+    );
+
+    alert(
+      "ERROR REAL: " +
+      JSON.stringify(error)
     );
   }
+}
+
+function stopAR() {
+  if (!mindarThree) return;
+
+  mindarThree.stop();
+
+  mindarThree
+    .renderer
+    .setAnimationLoop(null);
+
+  stopButton.classList.add(
+    "hidden"
+  );
+
+  status.classList.add(
+    "hidden"
+  );
+
+  startScreen.classList.remove(
+    "hidden"
+  );
+
+  startButton.disabled =
+    false;
+
+  startButton.textContent =
+    "Comenzar";
+
+  mindarThree =
+    null;
+
+  layerMeshes = {};
+  glowMeshes = {};
+}
+
+startButton.addEventListener(
+  "click",
+  startAR
+);
+
+stopButton.addEventListener(
+  "click",
+  stopAR
 );
