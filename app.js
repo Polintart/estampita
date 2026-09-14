@@ -25,39 +25,81 @@ function smooth(v) {
 }
 
 /* =========================================================
-   MÁSCARA DE MATERIALIZACIÓN
-   Revela cada capa desde ARRIBA hacia ABAJO.
+   MATERIALIZACIÓN ORGÁNICA
    ========================================================= */
 
 function revealMaterial(material) {
+
   material.userData.revealProgress = 1.1;
-  material.userData.revealSoftness = 0.035;
+
+  material.userData.revealUniforms = null;
 
   material.onBeforeCompile = shader => {
+
     shader.uniforms.revealProgress = {
-      value: material.userData.revealProgress
+      value: 1.1
     };
 
-    shader.uniforms.revealSoftness = {
-      value: material.userData.revealSoftness
-    };
-
-    material.userData.revealUniforms = shader.uniforms;
+    material.userData.revealUniforms =
+      shader.uniforms;
 
     shader.fragmentShader =
       "uniform float revealProgress;\n" +
-      "uniform float revealSoftness;\n" +
       shader.fragmentShader.replace(
         "#include <alphatest_fragment>",
         `
+        /*
+         * Borde orgánico.
+         *
+         * No es una línea perfectamente horizontal:
+         * tiene pequeñas ondulaciones y variaciones
+         * naturales a lo largo del ancho.
+         */
+
+        float organicWave =
+          sin(vMapUv.x * 8.0 +
+              revealProgress * 5.0) * 0.018;
+
+        organicWave +=
+          sin(vMapUv.x * 17.0 -
+              revealProgress * 7.0) * 0.012;
+
+        organicWave +=
+          sin(vMapUv.x * 31.0 +
+              revealProgress * 3.0) * 0.007;
+
+        organicWave +=
+          sin(vMapUv.x * 4.5 +
+              revealProgress * 11.0) * 0.020;
+
+        /*
+         * Pequeña irregularidad vertical.
+         */
+
+        float organicY =
+          sin(vMapUv.y * 18.0 +
+              vMapUv.x * 9.0) * 0.006;
+
+        float revealEdge =
+          revealProgress +
+          organicWave +
+          organicY;
+
+        /*
+         * Borde suave.
+         * Esto hace que la imagen se materialice
+         * progresivamente en lugar de aparecer cortada.
+         */
+
         float revealAmount =
           smoothstep(
-            revealProgress - revealSoftness,
-            revealProgress + revealSoftness,
+            revealEdge - 0.030,
+            revealEdge + 0.030,
             vMapUv.y
           );
 
-        diffuseColor.a *= revealAmount;
+        diffuseColor.a *=
+          revealAmount;
 
         #include <alphatest_fragment>
         `
@@ -68,81 +110,115 @@ function revealMaterial(material) {
 }
 
 /* =========================================================
-   BRILLO QUE RECORRE LOS TEXTOS
+   BRILLO DE TEXTO
    ========================================================= */
 
 function sweepGlow(texture, renderOrder) {
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      map: { value: texture },
-      progress: { value: -10 },
-      width: { value: 0.10 },
-      strength: { value: 1 }
-    },
 
-    vertexShader: `
-      varying vec2 vUv;
+  const material =
+    new THREE.ShaderMaterial({
 
-      void main() {
-        vUv = uv;
+      uniforms: {
 
-        gl_Position =
-          projectionMatrix *
-          modelViewMatrix *
-          vec4(position, 1.0);
-      }
-    `,
+        map: {
+          value: texture
+        },
 
-    fragmentShader: `
-      uniform sampler2D map;
-      uniform float progress;
-      uniform float width;
-      uniform float strength;
+        progress: {
+          value: -10
+        },
 
-      varying vec2 vUv;
+        width: {
+          value: 0.10
+        },
 
-      void main() {
-        vec4 tex = texture2D(map, vUv);
+        strength: {
+          value: 1
+        }
+      },
 
-        if (tex.a < 0.01)
-          discard;
+      vertexShader: `
+        varying vec2 vUv;
 
-        float p =
-          vUv.x * 0.90 +
-          vUv.y * 0.20;
+        void main() {
 
-        float glow =
-          1.0 -
-          smoothstep(
-            0.0,
-            width,
-            abs(p - progress)
-          );
+          vUv = uv;
 
-        gl_FragColor =
-          vec4(
-            vec3(1.0),
-            tex.a * glow * strength
-          );
+          gl_Position =
+            projectionMatrix *
+            modelViewMatrix *
+            vec4(position, 1.0);
+        }
+      `,
 
-        #include <colorspace_fragment>
-      }
-    `,
+      fragmentShader: `
+        uniform sampler2D map;
+        uniform float progress;
+        uniform float width;
+        uniform float strength;
 
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
-  });
+        varying vec2 vUv;
+
+        void main() {
+
+          vec4 tex =
+            texture2D(
+              map,
+              vUv
+            );
+
+          if (tex.a < 0.01)
+            discard;
+
+          float p =
+            vUv.x * 0.90 +
+            vUv.y * 0.20;
+
+          float glow =
+            1.0 -
+            smoothstep(
+              0.0,
+              width,
+              abs(p - progress)
+            );
+
+          gl_FragColor =
+            vec4(
+              vec3(1.0),
+              tex.a *
+              glow *
+              strength
+            );
+
+          #include <colorspace_fragment>
+        }
+      `,
+
+      transparent: true,
+
+      depthTest: false,
+
+      depthWrite: false,
+
+      blending:
+        THREE.AdditiveBlending
+    });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(commonPosition);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
@@ -151,46 +227,78 @@ function sweepGlow(texture, renderOrder) {
    BRILLO ADITIVO
    ========================================================= */
 
-function pulseGlow(texture, renderOrder) {
+function pulseGlow(
+  texture,
+  renderOrder
+) {
+
   const material =
     new THREE.MeshBasicMaterial({
+
       map: texture,
+
       transparent: true,
+
       opacity: 0,
+
       depthTest: false,
+
       depthWrite: false,
-      blending: THREE.AdditiveBlending
+
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(commonPosition);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
 
 /* =========================================================
-   HAZ DE LUZ
+   HAZ DE LUZ ORGÁNICO
    ========================================================= */
 
-function createRevealWave(renderOrder) {
+function createRevealWave(
+  renderOrder
+) {
+
   const material =
     new THREE.ShaderMaterial({
+
       uniforms: {
-        progress: { value: -1 },
-        intensity: { value: 0 },
-        width: { value: 0.055 }
+
+        progress: {
+          value: -1
+        },
+
+        intensity: {
+          value: 0
+        },
+
+        width: {
+          value: 0.075
+        }
       },
 
       vertexShader: `
         varying vec2 vUv;
 
         void main() {
+
           vUv = uv;
 
           gl_Position =
@@ -209,44 +317,106 @@ function createRevealWave(renderOrder) {
 
         void main() {
 
-          float d =
-            abs(vUv.y - progress);
+          /*
+           * El mismo movimiento orgánico
+           * que utiliza la máscara.
+           */
+
+          float organicWave =
+            sin(vUv.x * 8.0 +
+                progress * 5.0) * 0.018;
+
+          organicWave +=
+            sin(vUv.x * 17.0 -
+                progress * 7.0) * 0.012;
+
+          organicWave +=
+            sin(vUv.x * 31.0 +
+                progress * 3.0) * 0.007;
+
+          organicWave +=
+            sin(vUv.x * 4.5 +
+                progress * 11.0) * 0.020;
+
+          float organicEdge =
+            progress +
+            organicWave;
+
+          float distanceFromEdge =
+            abs(
+              vUv.y -
+              organicEdge
+            );
+
+          /*
+           * Núcleo brillante.
+           */
 
           float core =
             1.0 -
             smoothstep(
               0.0,
               width,
-              d
+              distanceFromEdge
             );
+
+          /*
+           * Halo más amplio.
+           */
 
           float halo =
             1.0 -
             smoothstep(
               0.0,
-              width * 3.8,
-              d
+              width * 4.5,
+              distanceFromEdge
             );
 
-          float fade =
-            0.75 +
-            0.25 *
+          /*
+           * Variación de intensidad
+           * a lo largo del haz.
+           */
+
+          float variation =
+            0.78 +
+            0.22 *
             sin(
-              vUv.x *
-              3.14159265
+              vUv.x * 12.0 +
+              progress * 8.0
+            );
+
+          /*
+           * Centro amarillo cálido.
+           */
+
+          vec3 warmLight =
+            mix(
+              vec3(
+                1.0,
+                0.62,
+                0.16
+              ),
+
+              vec3(
+                1.0,
+                0.92,
+                0.55
+              ),
+
+              core
             );
 
           float alpha =
             (
-              core * 0.62 +
-              halo * 0.20
+              core * 0.72 +
+              halo * 0.24
             ) *
             intensity *
-            fade;
+            variation;
 
           gl_FragColor =
             vec4(
-              vec3(1.0),
+              warmLight,
               alpha
             );
 
@@ -255,38 +425,57 @@ function createRevealWave(renderOrder) {
       `,
 
       transparent: true,
+
       depthTest: false,
+
       depthWrite: false,
-      blending: THREE.AdditiveBlending
+
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(commonPosition);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
 
 /* =========================================================
-   HALO DE LA CRUZ
+   HALO CÁLIDO DE LA CRUZ
    ========================================================= */
 
-function createCrossHalo(renderOrder) {
+function createCrossHalo(
+  renderOrder
+) {
+
   const material =
     new THREE.ShaderMaterial({
+
       uniforms: {
-        intensity: { value: 0 }
+
+        intensity: {
+          value: 0
+        }
       },
 
       vertexShader: `
         varying vec2 vUv;
 
         void main() {
+
           vUv = uv;
 
           gl_Position =
@@ -305,7 +494,10 @@ function createCrossHalo(renderOrder) {
 
           vec2 p =
             vUv -
-            vec2(0.5, 0.91);
+            vec2(
+              0.5,
+              0.91
+            );
 
           p.x *= 1.18;
 
@@ -313,21 +505,36 @@ function createCrossHalo(renderOrder) {
             length(p);
 
           float glow =
-            exp(-d * 18.0);
+            exp(
+              -d * 18.0
+            );
 
           float outer =
-            exp(-d * 7.0);
+            exp(
+              -d * 7.0
+            );
+
+          /*
+           * Amarillo cálido.
+           */
+
+          vec3 warm =
+            vec3(
+              1.0,
+              0.72,
+              0.28
+            );
 
           float alpha =
             (
-              glow * 0.72 +
-              outer * 0.12
+              glow * 0.78 +
+              outer * 0.16
             ) *
             intensity;
 
           gl_FragColor =
             vec4(
-              vec3(1.0),
+              warm,
               alpha
             );
 
@@ -336,19 +543,30 @@ function createCrossHalo(renderOrder) {
       `,
 
       transparent: true,
+
       depthTest: false,
+
       depthWrite: false,
-      blending: THREE.AdditiveBlending
+
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(commonPosition);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
@@ -362,6 +580,7 @@ function doubleBeat(
   period = 4.2,
   phase = 0
 ) {
+
   let t =
     (
       (time + phase) %
@@ -373,7 +592,8 @@ function doubleBeat(
   const beat1 =
     Math.exp(
       -Math.pow(
-        (t - 0.32) / 0.11,
+        (t - 0.32) /
+        0.11,
         2
       )
     );
@@ -381,13 +601,16 @@ function doubleBeat(
   const beat2 =
     Math.exp(
       -Math.pow(
-        (t - 0.58) / 0.13,
+        (t - 0.58) /
+        0.13,
         2
       )
-    ) * 0.62;
+    ) *
+    0.62;
 
   return clamp(
-    beat1 + beat2
+    beat1 +
+    beat2
   );
 }
 
@@ -397,7 +620,9 @@ function doubleBeat(
 
 async function startAR() {
 
-  startButton.disabled = true;
+  startButton.disabled =
+    true;
+
   startButton.textContent =
     "Abriendo cámara…";
 
@@ -405,6 +630,7 @@ async function startAR() {
 
     mindarThree =
       new MindARThree({
+
         container:
           document.querySelector(
             "#ar-container"
@@ -415,17 +641,31 @@ async function startAR() {
 
         maxTrack: 1,
 
-        /* NO TOCAR: tracking aprobado */
+        /*
+         * TRACKING APROBADO.
+         * NO MODIFICAR.
+         */
 
-        filterMinCF: 0.0005,
-        filterBeta: 1000,
+        filterMinCF:
+          0.0005,
 
-        warmupTolerance: 5,
-        missTolerance: 8,
+        filterBeta:
+          1000,
 
-        uiLoading: "no",
-        uiScanning: "no",
-        uiError: "no"
+        warmupTolerance:
+          5,
+
+        missTolerance:
+          8,
+
+        uiLoading:
+          "no",
+
+        uiScanning:
+          "no",
+
+        uiError:
+          "no"
       });
 
     const {
@@ -471,31 +711,45 @@ async function startAR() {
     const layers = [
 
       ["fondo-limpio.png", 0],
+
       ["texto-jesus.png", 1],
+
       ["pincelada-lila.png", 2],
+
       ["texto-comunion.png", 3],
+
       ["corazon-inferior.png", 4],
+
       ["corazon-superior.png", 5],
+
       ["cruz.png", 6],
 
       ["nena-cuerpo.png", 10],
+
       ["nena-flores.png", 11],
+
       ["nena-cara.png", 12],
+
       ["nena-pelo.png", 13],
+
       ["nena-corona.png", 14],
 
       ["gatito-superior.png", 20],
+
       ["gatito-inferior.png", 21],
 
       ["corazones.png", 30],
+
       ["estrellas.png", 31],
+
       ["destellos.png", 32],
 
       ["marco-corazones.png", 40]
     ];
 
     for (
-      const [file, order] of layers
+      const [file, order]
+      of layers
     ) {
 
       const texture =
@@ -508,11 +762,17 @@ async function startAR() {
 
       const material =
         new THREE.MeshBasicMaterial({
+
           map: texture,
+
           transparent: true,
+
           alphaTest: 0.01,
+
           depthTest: false,
+
           depthWrite: false,
+
           opacity: 1
         });
 
@@ -556,14 +816,20 @@ async function startAR() {
 
       glowMeshes[file] =
         type === "sweep"
+
           ? sweepGlow(
               layerMeshes[file]
-                .material.map,
+                .material
+                .map,
+
               order
             )
+
           : pulseGlow(
               layerMeshes[file]
-                .material.map,
+                .material
+                .map,
+
               order
             );
 
@@ -610,18 +876,26 @@ async function startAR() {
     );
 
     /* =====================================================
-       NUEVOS EFECTOS WOW
+       HAZ ORGÁNICO
        ===================================================== */
 
     const revealWave =
-      createRevealWave(45);
+      createRevealWave(
+        45
+      );
 
     stabilizedGroup.add(
       revealWave
     );
 
+    /* =====================================================
+       HALO CRUZ
+       ===================================================== */
+
     const crossHalo =
-      createCrossHalo(6.4);
+      createCrossHalo(
+        6.4
+      );
 
     stabilizedGroup.add(
       crossHalo
@@ -633,24 +907,33 @@ async function startAR() {
 
     Object.values(
       layerMeshes
-    ).forEach(mesh => {
-      mesh.material.opacity = 0;
-    });
+    ).forEach(
+      mesh => {
+
+        mesh.material.opacity =
+          0;
+      }
+    );
 
     Object.values(
       glowMeshes
-    ).forEach(mesh => {
-      mesh.material.opacity = 0;
-    });
+    ).forEach(
+      mesh => {
+
+        mesh.material.opacity =
+          0;
+      }
+    );
 
     /* =====================================================
-       VARIABLES TRACKING
+       TRACKING
        ===================================================== */
 
     let stabilizerReady =
       false;
 
-    let foundAt = null;
+    let foundAt =
+      null;
 
     let targetVisible =
       false;
@@ -684,19 +967,22 @@ async function startAR() {
           .material
           .uniforms
           .progress
-          .value = 1.1;
+          .value =
+          1.1;
 
         revealWave
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         crossHalo
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         status.textContent =
           "¡La estampita cobró vida!";
@@ -713,36 +999,51 @@ async function startAR() {
     anchor.onTargetLost =
       () => {
 
-        foundAt = null;
-        targetVisible = false;
-        stabilizerReady = false;
+        foundAt =
+          null;
+
+        targetVisible =
+          false;
+
+        stabilizerReady =
+          false;
 
         stabilizedGroup.visible =
           false;
 
         Object.values(
           layerMeshes
-        ).forEach(mesh => {
-          mesh.material.opacity = 0;
-        });
+        ).forEach(
+          mesh => {
+
+            mesh.material.opacity =
+              0;
+          }
+        );
 
         Object.values(
           glowMeshes
-        ).forEach(mesh => {
-          mesh.material.opacity = 0;
-        });
+        ).forEach(
+          mesh => {
+
+            mesh.material.opacity =
+              0;
+          }
+        );
 
         revealWave
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         crossHalo
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         status.textContent =
           "Apuntá la cámara a la estampita";
@@ -773,7 +1074,7 @@ async function startAR() {
       "Apuntá la cámara a la estampita";
 
     /* =====================================================
-       ANIMACIÓN
+       LOOP
        ===================================================== */
 
     const clock =
@@ -791,7 +1092,8 @@ async function startAR() {
         const time =
           clock.elapsedTime;
 
-        let elapsed = 999;
+        let elapsed =
+          999;
 
         if (
           foundAt !== null
@@ -801,7 +1103,8 @@ async function startAR() {
             (
               performance.now() -
               foundAt
-            ) / 1000;
+            ) /
+            1000;
         }
 
         /* =================================================
@@ -816,7 +1119,9 @@ async function startAR() {
             true;
 
           anchor.group
-            .updateMatrixWorld(true);
+            .updateMatrixWorld(
+              true
+            );
 
           anchor.group
             .matrixWorld
@@ -832,15 +1137,21 @@ async function startAR() {
 
             stabilizedGroup
               .position
-              .copy(rawPosition);
+              .copy(
+                rawPosition
+              );
 
             stabilizedGroup
               .quaternion
-              .copy(rawQuaternion);
+              .copy(
+                rawQuaternion
+              );
 
             stabilizedGroup
               .scale
-              .copy(rawScale);
+              .copy(
+                rawScale
+              );
 
             stabilizerReady =
               true;
@@ -853,7 +1164,8 @@ async function startAR() {
                 rawPosition,
                 1 -
                 Math.exp(
-                  -9 * delta
+                  -9 *
+                  delta
                 )
               );
 
@@ -863,7 +1175,8 @@ async function startAR() {
                 rawQuaternion,
                 1 -
                 Math.exp(
-                  -11 * delta
+                  -11 *
+                  delta
                 )
               );
 
@@ -873,35 +1186,30 @@ async function startAR() {
                 rawScale,
                 1 -
                 Math.exp(
-                  -9 * delta
+                  -9 *
+                  delta
                 )
               );
           }
         }
 
         /* =================================================
-           MATERIALIZACIÓN
+           REVELACIÓN ORGÁNICA
            ================================================= */
 
         if (
           targetVisible
         ) {
 
-          /*
-           * Esperamos un instante después
-           * del reconocimiento.
-           */
-
           const revealStart =
             0.45;
 
           /*
-           * El haz tarda 3.5 segundos
-           * en recorrer toda la estampita.
+           * Un poco más lenta que antes.
            */
 
           const revealDuration =
-            3.5;
+            3.50;
 
           let revealProgress;
 
@@ -911,7 +1219,7 @@ async function startAR() {
           ) {
 
             revealProgress =
-              1.1;
+              1.10;
 
           } else {
 
@@ -924,10 +1232,6 @@ async function startAR() {
                 revealDuration
               );
 
-            /*
-             * Empieza arriba y baja lentamente.
-             */
-
             revealProgress =
               1.08 -
               smooth(p) *
@@ -935,31 +1239,33 @@ async function startAR() {
           }
 
           /*
-           * Todas las capas se materializan
-           * detrás del haz.
+           * Aplicar el mismo avance
+           * a todas las capas.
            */
 
           Object.values(
             layerMeshes
-          ).forEach(mesh => {
+          ).forEach(
+            mesh => {
 
-            mesh.material.opacity =
-              1;
+              mesh.material.opacity =
+                1;
 
-            if (
-              mesh.material
-                .userData
-                .revealUniforms
-            ) {
+              if (
+                mesh.material
+                  .userData
+                  .revealUniforms
+              ) {
 
-              mesh.material
-                .userData
-                .revealUniforms
-                .revealProgress
-                .value =
-                revealProgress;
+                mesh.material
+                  .userData
+                  .revealUniforms
+                  .revealProgress
+                  .value =
+                  revealProgress;
+              }
             }
-          });
+          );
 
           /* =================================================
              CRUZ
@@ -975,11 +1281,14 @@ async function startAR() {
               "cruz.png"
             ];
 
-          let ignition = 0;
+          let ignition =
+            0;
 
           if (
-            elapsed >= 0.35 &&
-            elapsed < 1.30
+            elapsed >=
+              0.35 &&
+            elapsed <
+              1.30
           ) {
 
             const p =
@@ -996,8 +1305,10 @@ async function startAR() {
               );
 
           } else if (
-            elapsed >= 1.30 &&
-            elapsed < 2.10
+            elapsed >=
+              1.30 &&
+            elapsed <
+              2.10
           ) {
 
             ignition =
@@ -1018,7 +1329,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 0.75
+                  time *
+                  0.75
                 ) +
                 1
               ) /
@@ -1031,15 +1343,18 @@ async function startAR() {
             Math.max(
               cross.material.opacity,
               0.82 +
-              ignition * 0.18 +
+              ignition *
+              0.18 +
               ambientPulse
             );
 
           crossGlow.material.opacity =
             Math.min(
               1,
-              ignition * 1.15 +
-              ambientPulse * 0.5
+              ignition *
+              1.15 +
+              ambientPulse *
+              0.5
             );
 
           crossHalo
@@ -1049,7 +1364,8 @@ async function startAR() {
             .value =
             Math.min(
               1,
-              ignition * 1.25
+              ignition *
+              1.25
             );
 
           /* =================================================
@@ -1057,8 +1373,10 @@ async function startAR() {
              ================================================= */
 
           if (
-            elapsed >= 0.45 &&
-            elapsed <= 3.95
+            elapsed >=
+              0.45 &&
+            elapsed <=
+              3.95
           ) {
 
             const p =
@@ -1084,7 +1402,7 @@ async function startAR() {
               .uniforms
               .intensity
               .value =
-              0.82 *
+              0.95 *
               Math.sin(
                 p *
                 Math.PI
@@ -1112,14 +1430,16 @@ async function startAR() {
           hair.position.x =
             commonPosition.x +
             Math.sin(
-              time * 1.2
+              time *
+              1.2
             ) *
             0.004;
 
           hair.position.y =
             commonPosition.y +
             Math.sin(
-              time * 1.5
+              time *
+              1.5
             ) *
             0.002;
 
@@ -1135,7 +1455,8 @@ async function startAR() {
           crown.position.x =
             commonPosition.x +
             Math.sin(
-              time * 1.2 +
+              time *
+              1.2 +
               0.3
             ) *
             0.003;
@@ -1143,14 +1464,16 @@ async function startAR() {
           crown.position.y =
             commonPosition.y +
             Math.sin(
-              time * 1.5 +
+              time *
+              1.5 +
               0.3
             ) *
             0.0015;
 
           crown.rotation.z =
             Math.sin(
-              time * 1.1
+              time *
+              1.1
             ) *
             0.008;
 
@@ -1166,7 +1489,8 @@ async function startAR() {
           catTop.position.x =
             commonPosition.x +
             Math.sin(
-              time * 0.75 +
+              time *
+              0.75 +
               1.5
             ) *
             0.003;
@@ -1174,7 +1498,8 @@ async function startAR() {
           catTop.position.y =
             commonPosition.y +
             Math.sin(
-              time * 1.0 +
+              time *
+              1.0 +
               0.5
             ) *
             0.004;
@@ -1191,7 +1516,8 @@ async function startAR() {
           catBottom.position.x =
             commonPosition.x +
             Math.sin(
-              time * 0.65 +
+              time *
+              0.65 +
               3.0
             ) *
             0.0025;
@@ -1199,7 +1525,8 @@ async function startAR() {
           catBottom.position.y =
             commonPosition.y +
             Math.sin(
-              time * 0.9 +
+              time *
+              0.9 +
               2.0
             ) *
             0.0035;
@@ -1229,12 +1556,14 @@ async function startAR() {
             .material
             .opacity =
             0.82 +
-            beat * 0.18;
+            beat *
+            0.18;
 
           decorativeHeartGlow
             .material
             .opacity =
-            beat * 0.48;
+            beat *
+            0.48;
 
           /* =================================================
              CORAZÓN SUPERIOR
@@ -1259,10 +1588,12 @@ async function startAR() {
 
           topHeart.material.opacity =
             0.84 +
-            topBeat * 0.16;
+            topBeat *
+            0.16;
 
           topHeartGlow.material.opacity =
-            topBeat * 0.42;
+            topBeat *
+            0.42;
 
           /* =================================================
              CORAZÓN INFERIOR
@@ -1287,10 +1618,12 @@ async function startAR() {
 
           bottomHeart.material.opacity =
             0.84 +
-            bottomBeat * 0.16;
+            bottomBeat *
+            0.16;
 
           bottomHeartGlow.material.opacity =
-            bottomBeat * 0.42;
+            bottomBeat *
+            0.42;
 
           /* =================================================
              DESTELLOS
@@ -1310,7 +1643,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 1.8
+                  time *
+                  1.8
                 ) +
                 1
               ) /
@@ -1322,7 +1656,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 3.1 +
+                  time *
+                  3.1 +
                   1.7
                 ) +
                 1
@@ -1335,7 +1670,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 4.7 +
+                  time *
+                  4.7 +
                   3
                 ) +
                 1
@@ -1347,17 +1683,21 @@ async function startAR() {
           const sparkle =
             clamp(
               wave1 +
-              wave2 * 0.65 +
-              wave3 * 0.45
+              wave2 *
+              0.65 +
+              wave3 *
+              0.45
             );
 
           sparkles.material.opacity =
             0.18 +
-            sparkle * 0.82;
+            sparkle *
+            0.82;
 
           sparkleGlow.material.opacity =
             0.08 +
-            sparkle * 0.90;
+            sparkle *
+            0.90;
 
           /* =================================================
              ESTRELLAS
@@ -1372,7 +1712,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 1.25 +
+                  time *
+                  1.25 +
                   0.8
                 ) +
                 1
@@ -1383,7 +1724,8 @@ async function startAR() {
 
           stars.material.opacity =
             0.68 +
-            starWave * 0.32;
+            starWave *
+            0.32;
 
           /* =================================================
              TEXTOS
@@ -1459,7 +1801,7 @@ async function startAR() {
 
           /*
            * Primero:
-           * Mi primera Comunión
+           * MI PRIMERA COMUNIÓN
            */
 
           textSweep(
@@ -1471,7 +1813,8 @@ async function startAR() {
 
           /*
            * Después:
-           * Que Jesús siempre camine a mi lado
+           * QUE JESÚS SIEMPRE
+           * CAMINE A MI LADO
            */
 
           textSweep(
@@ -1498,7 +1841,9 @@ async function startAR() {
 
     try {
 
-      if (mindarThree) {
+      if (
+        mindarThree
+      ) {
 
         mindarThree.stop();
 
@@ -1511,7 +1856,8 @@ async function startAR() {
 
     } catch (e) {}
 
-    mindarThree = null;
+    mindarThree =
+      null;
 
     startButton.disabled =
       false;
@@ -1528,7 +1874,9 @@ async function startAR() {
 
     alert(
       "ERROR REAL: " +
-      JSON.stringify(error)
+      JSON.stringify(
+        error
+      )
     );
   }
 }
@@ -1568,7 +1916,8 @@ function stopAR() {
   startButton.textContent =
     "Comenzar";
 
-  mindarThree = null;
+  mindarThree =
+    null;
 
   layerMeshes = {};
   glowMeshes = {};
