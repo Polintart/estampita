@@ -28,7 +28,8 @@ function smooth(v) {
    ESTADO DEL GIRO
    ========================================================= */
 
-let visualGroup = null;
+let flipContainer = null;
+let frontGroup = null;
 let backGroup = null;
 let backMesh = null;
 
@@ -42,7 +43,7 @@ let flipTo = 0;
 const FLIP_DURATION = 1.55;
 
 /* =========================================================
-   DESTELLOS DEL GIRO
+   DESTELLOS MÁGICOS
    ========================================================= */
 
 let flipSparkles = [];
@@ -612,7 +613,7 @@ function doubleBeat(
 }
 
 /* =========================================================
-   BOTÓN DE GIRO
+   BOTÓN
    ========================================================= */
 
 function createFlipButton() {
@@ -635,47 +636,53 @@ function createFlipButton() {
 
       position: "fixed",
 
-      left: "50%",
+      right: "18px",
 
-      bottom: "28px",
+      top: "50%",
 
       transform:
-        "translateX(-50%)",
+        "translateY(-50%)",
 
       zIndex: "9999",
 
       padding:
-        "11px 20px",
+        "12px 15px",
 
       border:
-        "1px solid rgba(255,215,140,0.75)",
+        "1px solid rgba(106,79,135,0.75)",
 
       borderRadius:
-        "999px",
+        "18px",
 
       background:
-        "rgba(73,48,32,0.82)",
+        "rgba(190,165,216,0.94)",
 
       color:
-        "#fff8e8",
+        "#fffaf4",
 
       fontFamily:
-        "Georgia, serif",
+        '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive',
 
       fontSize:
         "14px",
 
+      fontWeight:
+        "600",
+
       letterSpacing:
-        "0.3px",
+        "0.1px",
+
+      lineHeight:
+        "1.1",
 
       boxShadow:
-        "0 4px 18px rgba(0,0,0,0.25)",
+        "0 4px 18px rgba(80,55,105,0.24)",
 
       backdropFilter:
-        "blur(8px)",
+        "blur(6px)",
 
       WebkitBackdropFilter:
-        "blur(8px)",
+        "blur(6px)",
 
       cursor:
         "pointer",
@@ -687,13 +694,43 @@ function createFlipButton() {
         "none",
 
       transition:
-        "opacity 0.35s ease",
+        "opacity 0.4s ease, transform 0.25s ease",
 
       appearance:
         "none",
 
       WebkitAppearance:
-        "none"
+        "none",
+
+      whiteSpace:
+        "nowrap"
+    }
+  );
+
+  flipButton.addEventListener(
+    "pointerdown",
+    () => {
+
+      flipButton.style.transform =
+        "translateY(-50%) scale(0.96)";
+    }
+  );
+
+  flipButton.addEventListener(
+    "pointerup",
+    () => {
+
+      flipButton.style.transform =
+        "translateY(-50%) scale(1)";
+    }
+  );
+
+  flipButton.addEventListener(
+    "pointercancel",
+    () => {
+
+      flipButton.style.transform =
+        "translateY(-50%) scale(1)";
     }
   );
 
@@ -756,37 +793,23 @@ function hideFlipButton() {
 }
 
 /* =========================================================
-   DESTELLOS MÁGICOS
+   CREAR DESTELLOS
    ========================================================= */
 
 function createFlipMagic() {
 
-  if (!visualGroup)
+  if (!flipContainer)
     return;
 
-  flipSparkles.forEach(
-    sparkle => {
-
-      if (
-        sparkle.parent
-      ) {
-
-        sparkle.parent.remove(
-          sparkle
-        );
-      }
-    }
-  );
-
-  flipSparkles = [];
+  clearFlipMagic();
 
   /*
-   * Pequeñas partículas doradas.
+   * Partículas alrededor de la estampita.
    */
 
   for (
     let i = 0;
-    i < 42;
+    i < 46;
     i++
   ) {
 
@@ -797,7 +820,7 @@ function createFlipMagic() {
           new THREE.Color(
             1.0,
             0.78,
-            0.35
+            0.32
           ),
 
         transparent:
@@ -817,7 +840,7 @@ function createFlipMagic() {
       });
 
     const size =
-      0.006 +
+      0.005 +
       Math.random() *
       0.010;
 
@@ -830,41 +853,50 @@ function createFlipMagic() {
         material
       );
 
+    const angle =
+      Math.random() *
+      Math.PI *
+      2;
+
+    const radius =
+      0.035 +
+      Math.random() *
+      0.25;
+
     sparkle.position.set(
-      commonPosition.x,
-      commonPosition.y,
-      commonPosition.z + 0.012
+      Math.cos(angle) * radius,
+      Math.sin(angle) * radius,
+      0.055
     );
 
     sparkle.userData = {
 
       angle:
-        Math.random() *
-        Math.PI *
-        2,
+        angle,
 
-      distance:
-        0.04 +
-        Math.random() *
-        0.28,
-
-      speed:
-        0.75 +
-        Math.random() *
-        0.55,
+      radius:
+        radius,
 
       phase:
         Math.random(),
 
-      drift:
-        (Math.random() - 0.5) *
-        0.08
+      speed:
+        0.6 +
+        Math.random() *
+        1.0,
+
+      vertical:
+        (
+          Math.random() -
+          0.5
+        ) *
+        0.06
     };
 
     sparkle.renderOrder =
       1000 + i;
 
-    visualGroup.add(
+    flipContainer.add(
       sparkle
     );
 
@@ -883,8 +915,8 @@ function createFlipMagic() {
       color:
         new THREE.Color(
           1.0,
-          0.84,
-          0.48
+          0.86,
+          0.55
         ),
 
       transparent:
@@ -912,17 +944,16 @@ function createFlipMagic() {
       flashMaterial
     );
 
-  flipFlash.position.copy(
-    commonPosition
+  flipFlash.position.set(
+    commonPosition.x,
+    commonPosition.y,
+    0.075
   );
-
-  flipFlash.position.z +=
-    0.018;
 
   flipFlash.renderOrder =
     1100;
 
-  visualGroup.add(
+  flipContainer.add(
     flipFlash
   );
 }
@@ -936,24 +967,13 @@ function updateFlipMagic(
   time
 ) {
 
-  if (
-    !flipSparkles.length
-  )
-    return;
-
   const p =
     clamp(
       elapsed /
       FLIP_DURATION
     );
 
-  /*
-   * Las partículas aparecen,
-   * explotan hacia afuera
-   * y luego desaparecen.
-   */
-
-  const sparklePower =
+  const magic =
     Math.sin(
       p *
       Math.PI
@@ -966,81 +986,73 @@ function updateFlipMagic(
         sparkle.userData;
 
       const distance =
-        data.distance *
+        data.radius *
         (
-          0.15 +
+          0.35 +
           p *
-          1.15
+          1.35
         );
 
+      const angle =
+        data.angle +
+        time *
+        data.speed *
+        0.10;
+
       sparkle.position.x =
-        commonPosition.x +
-        Math.cos(
-          data.angle +
-          time *
-          0.18
-        ) *
+        Math.cos(angle) *
         distance;
 
       sparkle.position.y =
-        commonPosition.y +
-        Math.sin(
-          data.angle +
-          time *
-          0.18
-        ) *
+        Math.sin(angle) *
         distance;
 
       sparkle.position.z =
-        commonPosition.z +
-        0.025 +
+        0.045 +
+        data.vertical +
         Math.sin(
-          p *
-          Math.PI *
+          time *
           2 +
           data.phase *
-          6
+          8
         ) *
-        0.018;
+        0.012;
 
       sparkle.rotation.z =
         time *
         data.speed;
 
       sparkle.material.opacity =
-        sparklePower *
+        magic *
         (
           0.35 +
-          0.65 *
-          data.phase
+          data.phase *
+          0.65
         );
     }
   );
 
-  if (flipFlash) {
-
-    /*
-     * Flash forte perto da metade
-     * do giro.
-     */
+  if (
+    flipFlash
+  ) {
 
     const flash =
       Math.exp(
         -Math.pow(
           (p - 0.50) /
-          0.13,
+          0.12,
           2
         )
       );
 
     flipFlash.material.opacity =
       flash *
-      0.72;
+      0.78;
 
     const scale =
-      0.65 +
+      0.55 +
       flash *
-      0.75;
+      0.85;
 
     flipFlash.scale.set(
       scale,
@@ -1069,7 +1081,6 @@ function clearFlipMagic() {
       }
 
       sparkle.geometry.dispose();
-
       sparkle.material.dispose();
     }
   );
@@ -1090,7 +1101,6 @@ function clearFlipMagic() {
     }
 
     flipFlash.geometry.dispose();
-
     flipFlash.material.dispose();
 
     flipFlash =
@@ -1135,69 +1145,6 @@ function startFlip(
 }
 
 /* =========================================================
-   FINALIZAR GIRO
-   ========================================================= */
-
-function finishFlip() {
-
-  if (!visualGroup)
-    return;
-
-  visualGroup.rotation.y =
-    flipTo;
-
-  if (
-    flipTo === Math.PI
-  ) {
-
-    /*
-     * Ya estamos viendo
-     * el reverso.
-     */
-
-    visualGroup.visible =
-      false;
-
-    backGroup.visible =
-      true;
-
-    backGroup.rotation.y =
-      0;
-
-    flipState =
-      "back";
-
-    showFlipButton(
-      "Volver al frente"
-    );
-
-  } else {
-
-    /*
-     * Volvemos al frente.
-     */
-
-    backGroup.visible =
-      false;
-
-    visualGroup.rotation.y =
-      0;
-
-    visualGroup.visible =
-      true;
-
-    flipState =
-      "front";
-
-    showFlipButton(
-      "Ver reverso"
-    );
-  }
-
-  clearFlipMagic();
-}
-
-/* =========================================================
    ACTUALIZAR GIRO
    ========================================================= */
 
@@ -1221,6 +1168,10 @@ function updateFlip() {
       FLIP_DURATION
     );
 
+  /*
+   * Ease in/out.
+   */
+
   const e =
     0.5 -
     0.5 *
@@ -1237,27 +1188,33 @@ function updateFlip() {
     ) *
     e;
 
-  if (visualGroup)
-    visualGroup.rotation.y =
-      angle;
-
   /*
-   * El reverso aparece
-   * progresivamente al pasar
-   * la mitad del giro.
+   * ESTA ES LA CLAVE:
+   *
+   * Todo el conjunto frontal y trasero
+   * está dentro del mismo contenedor.
+   *
+   * No ocultamos el frente durante
+   * el giro.
    */
 
   if (
-    backGroup
+    flipContainer
   ) {
 
-    backGroup.visible =
-      p > 0.50;
-
-    backGroup.rotation.y =
-      angle -
-      Math.PI;
+    flipContainer.rotation.y =
+      angle;
   }
+
+  /*
+   * Destellos.
+   */
+
+  updateFlipMagic(
+    elapsed,
+    performance.now() /
+    1000
+  );
 
   if (
     p >= 1
@@ -1265,6 +1222,47 @@ function updateFlip() {
 
     finishFlip();
   }
+}
+
+/* =========================================================
+   FINALIZAR GIRO
+   ========================================================= */
+
+function finishFlip() {
+
+  if (
+    !flipContainer
+  )
+    return;
+
+  flipContainer.rotation.y =
+    flipTo;
+
+  if (
+    flipTo === Math.PI
+  ) {
+
+    flipState =
+      "back";
+
+    showFlipButton(
+      "Volver al frente"
+    );
+
+  } else {
+
+    flipState =
+      "front";
+
+    flipContainer.rotation.y =
+      0;
+
+    showFlipButton(
+      "Ver reverso"
+    );
+  }
+
+  clearFlipMagic();
 }
 
 /* =========================================================
@@ -1354,52 +1352,53 @@ async function startAR() {
     stabilizedGroup.visible =
       false;
 
-    /*
-     * IMPORTANTE:
-     *
-     * stabilizedGroup sigue siendo
-     * exclusivamente el grupo que
-     * recibe el tracking suavizado.
-     *
-     * El giro ocurre en visualGroup.
-     */
+    /* =====================================================
+       CONTENEDOR DEL GIRO
+       ===================================================== */
 
-    visualGroup =
+    flipContainer =
       new THREE.Group();
 
     stabilizedGroup.add(
-      visualGroup
+      flipContainer
     );
 
-    visualGroup.visible =
-      true;
+    /*
+     * GRUPO FRONTAL
+     */
 
-    visualGroup.rotation.y =
-      0;
+    frontGroup =
+      new THREE.Group();
 
-    /* =====================================================
-       GRUPO TRASERO
-       ===================================================== */
+    flipContainer.add(
+      frontGroup
+    );
+
+    /*
+     * GRUPO TRASERO
+     */
 
     backGroup =
       new THREE.Group();
 
-    stabilizedGroup.add(
+    /*
+     * El reverso se coloca físicamente
+     * detrás del frente.
+     */
+
+    backGroup.rotation.y =
+      Math.PI;
+
+    flipContainer.add(
       backGroup
     );
 
-    backGroup.visible =
-      false;
-
-    backGroup.rotation.y =
-      0;
+    const textureLoader =
+      new THREE.TextureLoader();
 
     /* =====================================================
        FONDO DEL REVERSO
        ===================================================== */
-
-    const textureLoader =
-      new THREE.TextureLoader();
 
     const backTexture =
       await textureLoader.loadAsync(
@@ -1444,6 +1443,15 @@ async function startAR() {
       commonPosition
     );
 
+    /*
+     * Un pequeño desplazamiento hacia
+     * atrás para evitar conflictos.
+     */
+
+    backMesh.position.z =
+      commonPosition.z -
+      0.002;
+
     backMesh.renderOrder =
       0;
 
@@ -1452,7 +1460,7 @@ async function startAR() {
     );
 
     /* =====================================================
-       CAPAS
+       CAPAS FRONTALES
        ===================================================== */
 
     const layers = [
@@ -1546,7 +1554,7 @@ async function startAR() {
       layerMeshes[file] =
         mesh;
 
-      visualGroup.add(
+      frontGroup.add(
         mesh
       );
     }
@@ -1580,7 +1588,7 @@ async function startAR() {
               order
             );
 
-      visualGroup.add(
+      frontGroup.add(
         glowMeshes[file]
       );
     }
@@ -1631,7 +1639,7 @@ async function startAR() {
         45
       );
 
-    visualGroup.add(
+    frontGroup.add(
       revealWave
     );
 
@@ -1644,7 +1652,7 @@ async function startAR() {
         6.4
       );
 
-    visualGroup.add(
+    frontGroup.add(
       crossHalo
     );
 
@@ -1679,16 +1687,7 @@ async function startAR() {
     flipState =
       "front";
 
-    visualGroup.visible =
-      true;
-
-    visualGroup.rotation.y =
-      0;
-
-    backGroup.visible =
-      false;
-
-    backGroup.rotation.y =
+    flipContainer.rotation.y =
       0;
 
     createFlipButton();
@@ -1734,42 +1733,15 @@ async function startAR() {
           false;
 
         /*
-         * Cada vez que encontramos
-         * nuevamente la estampita,
-         * volvemos al frente.
+         * Siempre que volvemos a detectar
+         * la estampita arrancamos de frente.
          */
 
-        if (
-          flipState !== "front"
-        ) {
+        flipState =
+          "front";
 
-          flipState =
-            "front";
-
-          if (
-            visualGroup
-          ) {
-
-            visualGroup.rotation.y =
-              0;
-
-            visualGroup.visible =
-              true;
-          }
-
-          if (
-            backGroup
-          ) {
-
-            backGroup.visible =
-              false;
-
-            backGroup.rotation.y =
-              0;
-          }
-        }
-
-        hideFlipButton();
+        flipContainer.rotation.y =
+          0;
 
         revealWave
           .material
@@ -1791,6 +1763,8 @@ async function startAR() {
           .intensity
           .value =
           0;
+
+        hideFlipButton();
 
         status.textContent =
           "¡La estampita cobró vida!";
@@ -1819,33 +1793,14 @@ async function startAR() {
         stabilizedGroup.visible =
           false;
 
-        /*
-         * Si se pierde la estampita,
-         * se cancela cualquier giro.
-         */
-
         flipState =
           "front";
 
         if (
-          visualGroup
+          flipContainer
         ) {
 
-          visualGroup.rotation.y =
-            0;
-
-          visualGroup.visible =
-            true;
-        }
-
-        if (
-          backGroup
-        ) {
-
-          backGroup.visible =
-            false;
-
-          backGroup.rotation.y =
+          flipContainer.rotation.y =
             0;
         }
 
@@ -2036,7 +1991,7 @@ async function startAR() {
         }
 
         /* =================================================
-           REVELACIÓN ORGÁNICA
+           ANIMACIÓN FRONTAL
            ================================================= */
 
         if (
@@ -2654,22 +2609,8 @@ async function startAR() {
 
         updateFlip();
 
-        if (
-          flipState === "flipping"
-        ) {
-
-          updateFlipMagic(
-            (
-              performance.now() -
-              flipStartTime
-            ) /
-            1000,
-            time
-          );
-        }
-
         /* =================================================
-           MOSTRAR BOTÓN
+           BOTÓN
            ================================================= */
 
         if (
@@ -2794,7 +2735,10 @@ function stopAR() {
   layerMeshes = {};
   glowMeshes = {};
 
-  visualGroup =
+  flipContainer =
+    null;
+
+  frontGroup =
     null;
 
   backGroup =
