@@ -7,241 +7,149 @@ const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
 let mindarThree = null;
-
 let layerMeshes = {};
 let glowMeshes = {};
 
 const commonPosition = new THREE.Vector3(-0.02, 0, 0.02);
 
-// =====================================================
-// ESTADO DEL FRENTE / REVERSO
-// =====================================================
+const clamp = v => Math.max(0, Math.min(1, v));
 
-let isBack = false;
-let flipActive = false;
-let flipProgress = 0;
+function ease(v) {
+  v = clamp(v);
+  return 1 - Math.pow(1 - v, 3);
+}
 
-let frontGroup = null;
+function smooth(v) {
+  v = clamp(v);
+  return v * v * (3 - 2 * v);
+}
+
+/* =========================================================
+   ESTADO DEL GIRO
+   ========================================================= */
+
+let visualGroup = null;
 let backGroup = null;
-let magicFlip = null;
+let backMesh = null;
+
 let flipButton = null;
 
-// =====================================================
-// UTILIDADES
-// =====================================================
+let flipState = "front";
+let flipStartTime = 0;
+let flipFrom = 0;
+let flipTo = 0;
 
-function clamp01(value) {
-  return Math.max(0, Math.min(1, value));
-}
+const FLIP_DURATION = 1.55;
 
-function easeOutCubic(value) {
-  value = clamp01(value);
-  return 1 - Math.pow(1 - value, 3);
-}
+/* =========================================================
+   DESTELLOS DEL GIRO
+   ========================================================= */
 
-function easeInOut(value) {
-  value = clamp01(value);
-  return value * value * (3 - 2 * value);
-}
+let flipSparkles = [];
+let flipFlash = null;
 
-function easeOutQuart(value) {
-  value = clamp01(value);
-  return 1 - Math.pow(1 - value, 4);
-}
+/* =========================================================
+   MATERIALIZACIÓN ORGÁNICA
+   ========================================================= */
 
-// =====================================================
-// MATERIALIZACIÓN ORGÁNICA
-// =====================================================
-
-function applyRevealMask(material) {
+function revealMaterial(material) {
 
   material.userData.revealProgress = 1.1;
-  material.userData.revealSoftness = 0.035;
+  material.userData.revealUniforms = null;
 
-  material.onBeforeCompile = (shader) => {
+  material.onBeforeCompile = shader => {
 
     shader.uniforms.revealProgress = {
-      value: material.userData.revealProgress
+      value: 1.1
     };
 
-    shader.uniforms.revealSoftness = {
-      value: material.userData.revealSoftness
-    };
-
-    material.userData.revealUniforms = shader.uniforms;
+    material.userData.revealUniforms =
+      shader.uniforms;
 
     shader.fragmentShader =
+      "uniform float revealProgress;\n" +
       shader.fragmentShader.replace(
         "#include <alphatest_fragment>",
         `
-          float organicWave =
-              sin(vUv.x * 8.0 + revealProgress * 5.0) * 0.018;
+        float organicWave =
+          sin(
+            vMapUv.x * 8.0 +
+            revealProgress * 5.0
+          ) * 0.018;
 
-          organicWave +=
-              sin(vUv.x * 17.0 - revealProgress * 7.0) * 0.012;
+        organicWave +=
+          sin(
+            vMapUv.x * 17.0 -
+            revealProgress * 7.0
+          ) * 0.012;
 
-          organicWave +=
-              sin(vUv.x * 31.0 + revealProgress * 3.0) * 0.007;
+        organicWave +=
+          sin(
+            vMapUv.x * 31.0 +
+            revealProgress * 3.0
+          ) * 0.007;
 
-          organicWave +=
-              sin(vUv.x * 4.5 + revealProgress * 11.0) * 0.020;
+        organicWave +=
+          sin(
+            vMapUv.x * 4.5 +
+            revealProgress * 11.0
+          ) * 0.020;
 
-          float organicY =
-              sin(vUv.y * 18.0 + vUv.x * 9.0) * 0.006;
+        float organicY =
+          sin(
+            vMapUv.y * 18.0 +
+            vMapUv.x * 9.0
+          ) * 0.006;
 
-          float revealEdge =
-              revealProgress + organicWave + organicY;
+        float revealEdge =
+          revealProgress +
+          organicWave +
+          organicY;
 
-          float revealAmount =
-              smoothstep(
-                revealEdge - revealSoftness,
-                revealEdge + revealSoftness,
-                vUv.y
-              );
+        float revealAmount =
+          smoothstep(
+            revealEdge - 0.030,
+            revealEdge + 0.030,
+            vMapUv.y
+          );
 
-          diffuseColor.a *= revealAmount;
+        diffuseColor.a *=
+          revealAmount;
 
-          #include <alphatest_fragment>
+        #include <alphatest_fragment>
         `
       );
-
-    shader.fragmentShader =
-      "uniform float revealProgress;\\nuniform float revealSoftness;\\n" +
-      shader.fragmentShader;
   };
 
   material.needsUpdate = true;
 }
 
-// =====================================================
-// BRILLO DE TEXTO
-// =====================================================
+/* =========================================================
+   BRILLO DE TEXTO
+   ========================================================= */
 
-function createSweepGlow(texture, position, renderOrder) {
-
-  const material = new THREE.ShaderMaterial({
-
-    uniforms: {
-      map: { value: texture },
-      progress: { value: -10 },
-      width: { value: 0.10 },
-      strength: { value: 1.0 }
-    },
-
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-
-        gl_Position =
-          projectionMatrix *
-          modelViewMatrix *
-          vec4(position, 1.0);
-      }
-    `,
-
-    fragmentShader: `
-      uniform sampler2D map;
-      uniform float progress;
-      uniform float width;
-      uniform float strength;
-
-      varying vec2 vUv;
-
-      void main() {
-
-        vec4 tex = texture2D(map, vUv);
-
-        if (tex.a < 0.01)
-          discard;
-
-        float position =
-          vUv.x * 0.90 +
-          vUv.y * 0.20;
-
-        float d =
-          abs(position - progress);
-
-        float glow =
-          1.0 - smoothstep(0.0, width, d);
-
-        glow *= strength;
-
-        gl_FragColor =
-          vec4(vec3(1.0), tex.a * glow);
-
-        #include <colorspace_fragment>
-      }
-    `,
-
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending
-  });
-
-  const mesh =
-    new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
-      material
-    );
-
-  mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
-
-  return mesh;
-}
-
-// =====================================================
-// GLOW SUAVE
-// =====================================================
-
-function createPulseGlow(texture, position, renderOrder) {
-
-  const material =
-    new THREE.MeshBasicMaterial({
-
-      map: texture,
-
-      transparent: true,
-
-      opacity: 0,
-
-      depthTest: false,
-      depthWrite: false,
-
-      blending: THREE.AdditiveBlending
-    });
-
-  const mesh =
-    new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
-      material
-    );
-
-  mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
-
-  return mesh;
-}
-
-// =====================================================
-// HAZ DE LUZ DE LA MATERIALIZACIÓN
-// =====================================================
-
-function createRevealWave(position, renderOrder) {
+function sweepGlow(texture, renderOrder) {
 
   const material =
     new THREE.ShaderMaterial({
 
       uniforms: {
 
-        progress: { value: -1 },
+        map: {
+          value: texture
+        },
 
-        intensity: { value: 0 },
+        progress: {
+          value: -10
+        },
 
-        width: { value: 0.055 }
+        width: {
+          value: 0.10
+        },
+
+        strength: {
+          value: 1
+        }
       },
 
       vertexShader: `
@@ -259,7 +167,163 @@ function createRevealWave(position, renderOrder) {
       `,
 
       fragmentShader: `
+        uniform sampler2D map;
+        uniform float progress;
+        uniform float width;
+        uniform float strength;
 
+        varying vec2 vUv;
+
+        void main() {
+
+          vec4 tex =
+            texture2D(
+              map,
+              vUv
+            );
+
+          if (tex.a < 0.01)
+            discard;
+
+          float p =
+            vUv.x * 0.90 +
+            vUv.y * 0.20;
+
+          float glow =
+            1.0 -
+            smoothstep(
+              0.0,
+              width,
+              abs(p - progress)
+            );
+
+          gl_FragColor =
+            vec4(
+              vec3(1.0),
+              tex.a *
+              glow *
+              strength
+            );
+
+          #include <colorspace_fragment>
+        }
+      `,
+
+      transparent: true,
+
+      depthTest: false,
+
+      depthWrite: false,
+
+      blending:
+        THREE.AdditiveBlending
+    });
+
+  const mesh =
+    new THREE.Mesh(
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
+      material
+    );
+
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
+
+  return mesh;
+}
+
+/* =========================================================
+   BRILLO ADITIVO
+   ========================================================= */
+
+function pulseGlow(
+  texture,
+  renderOrder
+) {
+
+  const material =
+    new THREE.MeshBasicMaterial({
+
+      map: texture,
+
+      transparent: true,
+
+      opacity: 0,
+
+      depthTest: false,
+
+      depthWrite: false,
+
+      blending:
+        THREE.AdditiveBlending
+    });
+
+  const mesh =
+    new THREE.Mesh(
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
+      material
+    );
+
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
+
+  return mesh;
+}
+
+/* =========================================================
+   HAZ DE LUZ ORGÁNICO
+   ========================================================= */
+
+function createRevealWave(
+  renderOrder
+) {
+
+  const material =
+    new THREE.ShaderMaterial({
+
+      uniforms: {
+
+        progress: {
+          value: -1
+        },
+
+        intensity: {
+          value: 0
+        },
+
+        width: {
+          value: 0.075
+        }
+      },
+
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+
+          vUv = uv;
+
+          gl_Position =
+            projectionMatrix *
+            modelViewMatrix *
+            vec4(position, 1.0);
+        }
+      `,
+
+      fragmentShader: `
         uniform float progress;
         uniform float intensity;
         uniform float width;
@@ -269,66 +333,87 @@ function createRevealWave(position, renderOrder) {
         void main() {
 
           float organicWave =
-              sin(vUv.x * 8.0 + progress * 5.0) * 0.018;
+            sin(
+              vUv.x * 8.0 +
+              progress * 5.0
+            ) * 0.018;
 
           organicWave +=
-              sin(vUv.x * 17.0 - progress * 7.0) * 0.012;
+            sin(
+              vUv.x * 17.0 -
+              progress * 7.0
+            ) * 0.012;
 
           organicWave +=
-              sin(vUv.x * 31.0 + progress * 3.0) * 0.007;
+            sin(
+              vUv.x * 31.0 +
+              progress * 3.0
+            ) * 0.007;
 
           organicWave +=
-              sin(vUv.x * 4.5 + progress * 11.0) * 0.020;
+            sin(
+              vUv.x * 4.5 +
+              progress * 11.0
+            ) * 0.020;
 
-          float edge =
-              progress +
-              organicWave;
+          float organicEdge =
+            progress +
+            organicWave;
 
-          float band =
-              abs(vUv.y - edge);
+          float distanceFromEdge =
+            abs(
+              vUv.y -
+              organicEdge
+            );
 
           float core =
-              1.0 -
-              smoothstep(
-                0.0,
-                width,
-                band
-              );
+            1.0 -
+            smoothstep(
+              0.0,
+              width,
+              distanceFromEdge
+            );
 
           float halo =
-              1.0 -
-              smoothstep(
-                0.0,
-                width * 4.5,
-                band
-              );
+            1.0 -
+            smoothstep(
+              0.0,
+              width * 4.5,
+              distanceFromEdge
+            );
 
-          float coreColor =
-              smoothstep(
-                0.0,
-                width * 1.5,
-                band
-              );
+          float variation =
+            0.78 +
+            0.22 *
+            sin(
+              vUv.x * 12.0 +
+              progress * 8.0
+            );
 
           vec3 warmLight =
             mix(
-              vec3(1.0, 0.62, 0.16),
-              vec3(1.0, 0.94, 0.62),
-              1.0 - coreColor
-            );
+              vec3(
+                1.0,
+                0.62,
+                0.16
+              ),
 
-          float sideFade =
-            0.75 +
-            0.25 *
-            sin(vUv.x * 3.14159265);
+              vec3(
+                1.0,
+                0.92,
+                0.55
+              ),
+
+              core
+            );
 
           float alpha =
             (
-              core * 0.70 +
-              halo * 0.22
+              core * 0.72 +
+              halo * 0.24
             ) *
             intensity *
-            sideFade;
+            variation;
 
           gl_FragColor =
             vec4(
@@ -343,34 +428,48 @@ function createRevealWave(position, renderOrder) {
       transparent: true,
 
       depthTest: false,
+
       depthWrite: false,
 
-      blending: THREE.AdditiveBlending
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
 
-// =====================================================
-// HALO DE LA CRUZ
-// =====================================================
+/* =========================================================
+   HALO CÁLIDO DE LA CRUZ
+   ========================================================= */
 
-function createCrossHalo(position, renderOrder) {
+function createCrossHalo(
+  renderOrder
+) {
 
   const material =
     new THREE.ShaderMaterial({
 
       uniforms: {
-        intensity: { value: 0 }
+
+        intensity: {
+          value: 0
+        }
       },
 
       vertexShader: `
@@ -388,7 +487,6 @@ function createCrossHalo(position, renderOrder) {
       `,
 
       fragmentShader: `
-
         uniform float intensity;
 
         varying vec2 vUv;
@@ -397,7 +495,10 @@ function createCrossHalo(position, renderOrder) {
 
           vec2 p =
             vUv -
-            vec2(0.5, 0.91);
+            vec2(
+              0.5,
+              0.91
+            );
 
           p.x *= 1.18;
 
@@ -405,22 +506,26 @@ function createCrossHalo(position, renderOrder) {
             length(p);
 
           float glow =
-            exp(-d * 18.0);
+            exp(
+              -d * 18.0
+            );
 
           float outer =
-            exp(-d * 7.0);
+            exp(
+              -d * 7.0
+            );
 
           vec3 warm =
             vec3(
               1.0,
-              0.78,
-              0.32
+              0.72,
+              0.28
             );
 
           float alpha =
             (
-              glow * 0.72 +
-              outer * 0.12
+              glow * 0.78 +
+              outer * 0.16
             ) *
             intensity;
 
@@ -437,26 +542,35 @@ function createCrossHalo(position, renderOrder) {
       transparent: true,
 
       depthTest: false,
+
       depthWrite: false,
 
-      blending: THREE.AdditiveBlending
+      blending:
+        THREE.AdditiveBlending
     });
 
   const mesh =
     new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1.5),
+      new THREE.PlaneGeometry(
+        1,
+        1.5
+      ),
       material
     );
 
-  mesh.position.copy(position);
-  mesh.renderOrder = renderOrder;
+  mesh.position.copy(
+    commonPosition
+  );
+
+  mesh.renderOrder =
+    renderOrder;
 
   return mesh;
 }
 
-// =====================================================
-// DOBLE LATIDO
-// =====================================================
+/* =========================================================
+   DOBLE LATIDO
+   ========================================================= */
 
 function doubleBeat(
   time,
@@ -475,7 +589,8 @@ function doubleBeat(
   const beat1 =
     Math.exp(
       -Math.pow(
-        (t - 0.32) / 0.11,
+        (t - 0.32) /
+        0.11,
         2
       )
     );
@@ -483,19 +598,22 @@ function doubleBeat(
   const beat2 =
     Math.exp(
       -Math.pow(
-        (t - 0.58) / 0.13,
+        (t - 0.58) /
+        0.13,
         2
       )
-    ) * 0.62;
+    ) *
+    0.62;
 
-  return clamp01(
-    beat1 + beat2
+  return clamp(
+    beat1 +
+    beat2
   );
 }
 
-// =====================================================
-// BOTÓN DE FRENTE / REVERSO
-// =====================================================
+/* =========================================================
+   BOTÓN DE GIRO
+   ========================================================= */
 
 function createFlipButton() {
 
@@ -508,13 +626,8 @@ function createFlipButton() {
   flipButton.id =
     "flip-button";
 
-  flipButton.innerHTML =
-    `
-      <span class="flip-icon">↻</span>
-      <span class="flip-label">
-        Ver reverso
-      </span>
-    `;
+  flipButton.textContent =
+    "Ver reverso";
 
   Object.assign(
     flipButton.style,
@@ -531,38 +644,32 @@ function createFlipButton() {
 
       zIndex: "9999",
 
-      display: "none",
-
-      alignItems: "center",
-
-      gap: "8px",
-
       padding:
-        "10px 17px",
+        "11px 20px",
 
       border:
-        "1px solid rgba(255,220,145,0.65)",
+        "1px solid rgba(255,215,140,0.75)",
 
       borderRadius:
         "999px",
 
       background:
-        "rgba(72,53,42,0.72)",
+        "rgba(73,48,32,0.82)",
 
       color:
-        "#fff7df",
+        "#fff8e8",
 
       fontFamily:
         "Georgia, serif",
 
       fontSize:
-        "15px",
+        "14px",
 
       letterSpacing:
-        "0.2px",
+        "0.3px",
 
       boxShadow:
-        "0 4px 18px rgba(0,0,0,0.22), 0 0 16px rgba(255,205,100,0.18)",
+        "0 4px 18px rgba(0,0,0,0.25)",
 
       backdropFilter:
         "blur(8px)",
@@ -573,21 +680,20 @@ function createFlipButton() {
       cursor:
         "pointer",
 
-      WebkitTapHighlightColor:
-        "transparent"
-    }
-  );
+      opacity:
+        "0",
 
-  const icon =
-    flipButton.querySelector(
-      ".flip-icon"
-    );
+      pointerEvents:
+        "none",
 
-  Object.assign(
-    icon.style,
-    {
-      fontSize: "20px",
-      lineHeight: "1"
+      transition:
+        "opacity 0.35s ease",
+
+      appearance:
+        "none",
+
+      WebkitAppearance:
+        "none"
     }
   );
 
@@ -596,12 +702,23 @@ function createFlipButton() {
     () => {
 
       if (
-        !targetVisible ||
-        flipActive
-      )
-        return;
+        flipState === "front"
+      ) {
 
-      startFlip();
+        startFlip(
+          0,
+          Math.PI
+        );
+
+      } else if (
+        flipState === "back"
+      ) {
+
+        startFlip(
+          Math.PI,
+          0
+        );
+      }
     }
   );
 
@@ -610,62 +727,66 @@ function createFlipButton() {
   );
 }
 
-function updateFlipButton() {
+function showFlipButton(
+  label
+) {
+
+  createFlipButton();
+
+  flipButton.textContent =
+    label;
+
+  flipButton.style.opacity =
+    "1";
+
+  flipButton.style.pointerEvents =
+    "auto";
+}
+
+function hideFlipButton() {
 
   if (!flipButton)
     return;
 
-  if (
-    !targetVisible ||
-    flipActive
-  ) {
+  flipButton.style.opacity =
+    "0";
 
-    flipButton.style.display =
-      "none";
-
-    return;
-  }
-
-  flipButton.style.display =
-    "flex";
-
-  const label =
-    flipButton.querySelector(
-      ".flip-label"
-    );
-
-  if (isBack) {
-
-    label.textContent =
-      "Volver al frente";
-
-  } else {
-
-    label.textContent =
-      "Ver reverso";
-  }
+  flipButton.style.pointerEvents =
+    "none";
 }
 
-// =====================================================
-// DESTELLOS MÁGICOS DEL GIRO
-// =====================================================
+/* =========================================================
+   DESTELLOS MÁGICOS
+   ========================================================= */
 
-function createMagicFlip(scene) {
+function createFlipMagic() {
 
-  const group =
-    new THREE.Group();
+  if (!visualGroup)
+    return;
 
-  group.visible = false;
+  flipSparkles.forEach(
+    sparkle => {
 
-  scene.add(group);
+      if (
+        sparkle.parent
+      ) {
 
-  const count = 34;
+        sparkle.parent.remove(
+          sparkle
+        );
+      }
+    }
+  );
 
-  const particles = [];
+  flipSparkles = [];
+
+  /*
+   * Pequeñas partículas doradas.
+   */
 
   for (
     let i = 0;
-    i < count;
+    i < 42;
     i++
   ) {
 
@@ -674,26 +795,33 @@ function createMagicFlip(scene) {
 
         color:
           new THREE.Color(
-            0xffd77a
+            1.0,
+            0.78,
+            0.35
           ),
 
-        transparent: true,
+        transparent:
+          true,
 
-        opacity: 0,
+        opacity:
+          0,
 
-        depthTest: false,
+        depthTest:
+          false,
 
-        depthWrite: false,
+        depthWrite:
+          false,
 
         blending:
           THREE.AdditiveBlending
       });
 
     const size =
-      0.008 +
-      Math.random() * 0.016;
+      0.006 +
+      Math.random() *
+      0.010;
 
-    const mesh =
+    const sparkle =
       new THREE.Mesh(
         new THREE.PlaneGeometry(
           size,
@@ -702,291 +830,446 @@ function createMagicFlip(scene) {
         material
       );
 
-    mesh.position.set(
-      (Math.random() - 0.5) * 0.72,
-      (Math.random() - 0.5) * 1.05,
-      0.08
+    sparkle.position.set(
+      commonPosition.x,
+      commonPosition.y,
+      commonPosition.z + 0.012
     );
 
-    mesh.userData = {
+    sparkle.userData = {
 
-      baseX:
-        mesh.position.x,
-
-      baseY:
-        mesh.position.y,
-
-      phase:
+      angle:
         Math.random() *
         Math.PI *
         2,
 
-      radius:
-        0.20 +
-        Math.random() * 0.55,
+      distance:
+        0.04 +
+        Math.random() *
+        0.28,
 
       speed:
-        1.2 +
-        Math.random() * 1.8
+        0.75 +
+        Math.random() *
+        0.55,
+
+      phase:
+        Math.random(),
+
+      drift:
+        (Math.random() - 0.5) *
+        0.08
     };
 
-    mesh.renderOrder =
-      200;
+    sparkle.renderOrder =
+      1000 + i;
 
-    group.add(mesh);
+    visualGroup.add(
+      sparkle
+    );
 
-    particles.push(mesh);
+    flipSparkles.push(
+      sparkle
+    );
   }
 
-  group.userData.particles =
-    particles;
+  /*
+   * Flash central.
+   */
 
-  return group;
+  const flashMaterial =
+    new THREE.MeshBasicMaterial({
+
+      color:
+        new THREE.Color(
+          1.0,
+          0.84,
+          0.48
+        ),
+
+      transparent:
+        true,
+
+      opacity:
+        0,
+
+      depthTest:
+        false,
+
+      depthWrite:
+        false,
+
+      blending:
+        THREE.AdditiveBlending
+    });
+
+  flipFlash =
+    new THREE.Mesh(
+      new THREE.PlaneGeometry(
+        1.0,
+        1.5
+      ),
+      flashMaterial
+    );
+
+  flipFlash.position.copy(
+    commonPosition
+  );
+
+  flipFlash.position.z +=
+    0.018;
+
+  flipFlash.renderOrder =
+    1100;
+
+  visualGroup.add(
+    flipFlash
+  );
 }
 
-// =====================================================
-// INICIO DEL GIRO
-// =====================================================
+/* =========================================================
+   ACTUALIZAR DESTELLOS
+   ========================================================= */
 
-function startFlip() {
+function updateFlipMagic(
+  elapsed,
+  time
+) {
 
   if (
-    flipActive ||
+    !flipSparkles.length
+  )
+    return;
+
+  const p =
+    clamp(
+      elapsed /
+      FLIP_DURATION
+    );
+
+  /*
+   * Las partículas aparecen,
+   * explotan hacia afuera
+   * y luego desaparecen.
+   */
+
+  const sparklePower =
+    Math.sin(
+      p *
+      Math.PI
+    );
+
+  flipSparkles.forEach(
+    sparkle => {
+
+      const data =
+        sparkle.userData;
+
+      const distance =
+        data.distance *
+        (
+          0.15 +
+          p *
+          1.15
+        );
+
+      sparkle.position.x =
+        commonPosition.x +
+        Math.cos(
+          data.angle +
+          time *
+          0.18
+        ) *
+        distance;
+
+      sparkle.position.y =
+        commonPosition.y +
+        Math.sin(
+          data.angle +
+          time *
+          0.18
+        ) *
+        distance;
+
+      sparkle.position.z =
+        commonPosition.z +
+        0.025 +
+        Math.sin(
+          p *
+          Math.PI *
+          2 +
+          data.phase *
+          6
+        ) *
+        0.018;
+
+      sparkle.rotation.z =
+        time *
+        data.speed;
+
+      sparkle.material.opacity =
+        sparklePower *
+        (
+          0.35 +
+          0.65 *
+          data.phase
+        );
+    }
+  );
+
+  if (flipFlash) {
+
+    /*
+     * Flash forte perto da metade
+     * do giro.
+     */
+
+    const flash =
+      Math.exp(
+        -Math.pow(
+          (p - 0.50) /
+          0.13,
+          2
+        )
+      );
+
+    flipFlash.material.opacity =
+      flash *
+      0.72;
+
+    const scale =
+      0.65 +
+      flash *
+      0.75;
+
+    flipFlash.scale.set(
+      scale,
+      scale,
+      1
+    );
+  }
+}
+
+/* =========================================================
+   LIMPIAR DESTELLOS
+   ========================================================= */
+
+function clearFlipMagic() {
+
+  flipSparkles.forEach(
+    sparkle => {
+
+      if (
+        sparkle.parent
+      ) {
+
+        sparkle.parent.remove(
+          sparkle
+        );
+      }
+
+      sparkle.geometry.dispose();
+
+      sparkle.material.dispose();
+    }
+  );
+
+  flipSparkles = [];
+
+  if (
+    flipFlash
+  ) {
+
+    if (
+      flipFlash.parent
+    ) {
+
+      flipFlash.parent.remove(
+        flipFlash
+      );
+    }
+
+    flipFlash.geometry.dispose();
+
+    flipFlash.material.dispose();
+
+    flipFlash =
+      null;
+  }
+}
+
+/* =========================================================
+   COMENZAR GIRO
+   ========================================================= */
+
+function startFlip(
+  from,
+  to
+) {
+
+  if (
+    flipState === "flipping"
+  )
+    return;
+
+  if (
     !targetVisible
   )
     return;
 
-  flipActive = true;
+  flipState =
+    "flipping";
 
-  flipProgress = 0;
+  flipStartTime =
+    performance.now();
 
-  if (magicFlip) {
+  flipFrom =
+    from;
 
-    magicFlip.visible =
-      true;
-  }
+  flipTo =
+    to;
 
-  if (flipButton) {
+  hideFlipButton();
 
-    flipButton.style.display =
-      "none";
-  }
+  createFlipMagic();
 }
 
-// =====================================================
-// ANIMAR EL GIRO
-// =====================================================
+/* =========================================================
+   FINALIZAR GIRO
+   ========================================================= */
 
-function updateFlipAnimation(delta) {
+function finishFlip() {
 
-  if (!flipActive)
+  if (!visualGroup)
     return;
 
-  flipProgress +=
-    delta / 1.45;
+  visualGroup.rotation.y =
+    flipTo;
 
-  const p =
-    clamp01(
-      flipProgress
-    );
+  if (
+    flipTo === Math.PI
+  ) {
 
-  const eased =
-    easeInOut(p);
+    /*
+     * Ya estamos viendo
+     * el reverso.
+     */
 
-  const direction =
-    isBack
-      ? -1
-      : 1;
+    visualGroup.visible =
+      false;
 
-  if (frontGroup) {
-
-    frontGroup.rotation.y =
-      direction *
-      Math.PI *
-      eased;
-  }
-
-  if (backGroup) {
+    backGroup.visible =
+      true;
 
     backGroup.rotation.y =
-      direction *
-      Math.PI *
-      eased;
-  }
+      0;
 
-  // ---------------------------------------------------
-  // DESTELLOS
-  // ---------------------------------------------------
+    flipState =
+      "back";
 
-  if (magicFlip) {
+    showFlipButton(
+      "Volver al frente"
+    );
 
-    const particles =
-      magicFlip.userData
-        .particles;
+  } else {
 
-    const centerBurst =
-      Math.sin(
-        p * Math.PI
-      );
+    /*
+     * Volvemos al frente.
+     */
 
-    magicFlip.visible =
-      centerBurst > 0.01;
+    backGroup.visible =
+      false;
 
-    particles.forEach(
-      (particle, index) => {
+    visualGroup.rotation.y =
+      0;
 
-        const data =
-          particle.userData;
+    visualGroup.visible =
+      true;
 
-        const angle =
-          data.phase +
-          p *
-          data.speed;
+    flipState =
+      "front";
 
-        const spread =
-          centerBurst *
-          data.radius;
-
-        particle.position.x =
-          Math.cos(angle) *
-          spread;
-
-        particle.position.y =
-          Math.sin(angle) *
-          spread *
-          1.35;
-
-        const sparkle =
-          Math.pow(
-            Math.sin(
-              p * Math.PI
-            ),
-            1.2
-          );
-
-        particle.material.opacity =
-          sparkle *
-          (
-            0.35 +
-            0.65 *
-            (
-              0.5 +
-              0.5 *
-              Math.sin(
-                index +
-                p * 20
-              )
-            )
-          );
-
-        const scale =
-          0.6 +
-          sparkle *
-          1.8;
-
-        particle.scale.set(
-          scale,
-          scale,
-          1
-        );
-
-        particle.rotation.z =
-          angle;
-      }
+    showFlipButton(
+      "Ver reverso"
     );
   }
 
-  // ---------------------------------------------------
-  // MOMENTO CENTRAL DEL GIRO
-  // ---------------------------------------------------
+  clearFlipMagic();
+}
+
+/* =========================================================
+   ACTUALIZAR GIRO
+   ========================================================= */
+
+function updateFlip() {
 
   if (
-    p >= 0.5 &&
-    !isBack
+    flipState !== "flipping"
+  )
+    return;
+
+  const elapsed =
+    (
+      performance.now() -
+      flipStartTime
+    ) /
+    1000;
+
+  const p =
+    clamp(
+      elapsed /
+      FLIP_DURATION
+    );
+
+  const e =
+    0.5 -
+    0.5 *
+    Math.cos(
+      p *
+      Math.PI
+    );
+
+  const angle =
+    flipFrom +
+    (
+      flipTo -
+      flipFrom
+    ) *
+    e;
+
+  if (visualGroup)
+    visualGroup.rotation.y =
+      angle;
+
+  /*
+   * El reverso aparece
+   * progresivamente al pasar
+   * la mitad del giro.
+   */
+
+  if (
+    backGroup
   ) {
 
-    frontGroup.visible =
-      false;
-
     backGroup.visible =
-      true;
+      p > 0.50;
+
+    backGroup.rotation.y =
+      angle -
+      Math.PI;
   }
 
   if (
-    p >= 0.5 &&
-    isBack
+    p >= 1
   ) {
 
-    frontGroup.visible =
-      true;
-
-    backGroup.visible =
-      false;
-  }
-
-  // ---------------------------------------------------
-  // FIN
-  // ---------------------------------------------------
-
-  if (p >= 1) {
-
-    flipActive =
-      false;
-
-    isBack =
-      !isBack;
-
-    if (isBack) {
-
-      frontGroup.visible =
-        false;
-
-      backGroup.visible =
-        true;
-
-      frontGroup.rotation.y =
-        Math.PI;
-
-      backGroup.rotation.y =
-        Math.PI;
-
-    } else {
-
-      frontGroup.visible =
-        true;
-
-      backGroup.visible =
-        false;
-
-      frontGroup.rotation.y =
-        0;
-
-      backGroup.rotation.y =
-        0;
-    }
-
-    if (magicFlip) {
-
-      magicFlip.visible =
-        false;
-
-      magicFlip.userData
-        .particles
-        .forEach(
-          particle => {
-            particle.material.opacity =
-              0;
-          }
-        );
-    }
-
-    updateFlipButton();
+    finishFlip();
   }
 }
 
-// =====================================================
-// START AR
-// =====================================================
+/* =========================================================
+   INICIAR AR
+   ========================================================= */
 
 async function startAR() {
 
@@ -1011,9 +1294,10 @@ async function startAR() {
 
         maxTrack: 1,
 
-        // ------------------------------------------------
-        // TRACKING ESTABLE
-        // ------------------------------------------------
+        /*
+         * TRACKING APROBADO.
+         * NO MODIFICAR.
+         */
 
         filterMinCF:
           0.0005,
@@ -1041,8 +1325,7 @@ async function startAR() {
       renderer,
       scene,
       camera
-    } =
-      mindarThree;
+    } = mindarThree;
 
     renderer.setPixelRatio(
       Math.min(
@@ -1054,431 +1337,69 @@ async function startAR() {
     renderer.outputColorSpace =
       THREE.SRGBColorSpace;
 
-    // ===================================================
-    // TRACKING PROXY
-    // ===================================================
-
     const anchor =
       mindarThree.addAnchor(0);
 
-    // ===================================================
-    // GRUPO ESTABILIZADO
-    // ===================================================
+    /* =====================================================
+       ESTABILIZADOR
+       ===================================================== */
 
-    frontGroup =
+    const stabilizedGroup =
       new THREE.Group();
 
     scene.add(
-      frontGroup
+      stabilizedGroup
     );
 
-    frontGroup.visible =
+    stabilizedGroup.visible =
       false;
 
-    // ===================================================
-    // GRUPO DEL REVERSO
-    // ===================================================
+    /*
+     * IMPORTANTE:
+     *
+     * stabilizedGroup sigue siendo
+     * exclusivamente el grupo que
+     * recibe el tracking suavizado.
+     *
+     * El giro ocurre en visualGroup.
+     */
+
+    visualGroup =
+      new THREE.Group();
+
+    stabilizedGroup.add(
+      visualGroup
+    );
+
+    visualGroup.visible =
+      true;
+
+    visualGroup.rotation.y =
+      0;
+
+    /* =====================================================
+       GRUPO TRASERO
+       ===================================================== */
 
     backGroup =
       new THREE.Group();
 
-    scene.add(
+    stabilizedGroup.add(
       backGroup
     );
 
     backGroup.visible =
       false;
 
-    // ===================================================
-    // DESTELLOS DEL GIRO
-    // ===================================================
+    backGroup.rotation.y =
+      0;
 
-    magicFlip =
-      createMagicFlip(scene);
-
-    // ===================================================
-    // BOTÓN
-    // ===================================================
-
-    createFlipButton();
-
-    // ===================================================
-    // TEXTURAS
-    // ===================================================
+    /* =====================================================
+       FONDO DEL REVERSO
+       ===================================================== */
 
     const textureLoader =
       new THREE.TextureLoader();
-
-    // ===================================================
-    // CAPAS DEL FRENTE
-    // ===================================================
-
-    const layers = [
-
-      {
-        file:
-          "fondo-limpio.png",
-        order: 0
-      },
-
-      {
-        file:
-          "texto-jesus.png",
-        order: 1
-      },
-
-      {
-        file:
-          "pincelada-lila.png",
-        order: 2
-      },
-
-      {
-        file:
-          "texto-comunion.png",
-        order: 3
-      },
-
-      {
-        file:
-          "corazon-inferior.png",
-        order: 4
-      },
-
-      {
-        file:
-          "corazon-superior.png",
-        order: 5
-      },
-
-      {
-        file:
-          "cruz.png",
-        order: 6
-      },
-
-      {
-        file:
-          "nena-cuerpo.png",
-        order: 10
-      },
-
-      {
-        file:
-          "nena-flores.png",
-        order: 11
-      },
-
-      {
-        file:
-          "nena-cara.png",
-        order: 12
-      },
-
-      {
-        file:
-          "nena-pelo.png",
-        order: 13
-      },
-
-      {
-        file:
-          "nena-corona.png",
-        order: 14
-      },
-
-      {
-        file:
-          "gatito-superior.png",
-        order: 20
-      },
-
-      {
-        file:
-          "gatito-inferior.png",
-        order: 21
-      },
-
-      {
-        file:
-          "corazones.png",
-        order: 30
-      },
-
-      {
-        file:
-          "estrellas.png",
-        order: 31
-      },
-
-      {
-        file:
-          "destellos.png",
-        order: 32
-      },
-
-      {
-        file:
-          "marco-corazones.png",
-        order: 40
-      }
-    ];
-
-    // ===================================================
-    // CARGAR FRENTE
-    // ===================================================
-
-    for (
-      const layer of layers
-    ) {
-
-      let texture;
-
-      try {
-
-        texture =
-          await textureLoader
-            .loadAsync(
-              `./assets/animation/${layer.file}`
-            );
-
-      } catch (error) {
-
-        alert(
-          "NO SE PUDO CARGAR: " +
-          layer.file
-        );
-
-        throw error;
-      }
-
-      texture.colorSpace =
-        THREE.SRGBColorSpace;
-
-      const material =
-        new THREE.MeshBasicMaterial({
-
-          map:
-            texture,
-
-          transparent:
-            true,
-
-          alphaTest:
-            0.01,
-
-          depthTest:
-            false,
-
-          depthWrite:
-            false,
-
-          opacity:
-            1,
-
-          side:
-            THREE.DoubleSide
-        });
-
-      applyRevealMask(
-        material
-      );
-
-      const mesh =
-        new THREE.Mesh(
-
-          new THREE.PlaneGeometry(
-            1,
-            1.5
-          ),
-
-          material
-        );
-
-      mesh.position.copy(
-        commonPosition
-      );
-
-      mesh.renderOrder =
-        layer.order;
-
-      layerMeshes[
-        layer.file
-      ] = mesh;
-
-      frontGroup.add(
-        mesh
-      );
-    }
-
-    // ===================================================
-    // GLOWS
-    // ===================================================
-
-    glowMeshes[
-      "texto-jesus.png"
-    ] =
-      createSweepGlow(
-        layerMeshes[
-          "texto-jesus.png"
-        ].material.map,
-
-        commonPosition,
-
-        1.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "texto-jesus.png"
-      ]
-    );
-
-    glowMeshes[
-      "texto-comunion.png"
-    ] =
-      createSweepGlow(
-        layerMeshes[
-          "texto-comunion.png"
-        ].material.map,
-
-        commonPosition,
-
-        3.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "texto-comunion.png"
-      ]
-    );
-
-    glowMeshes[
-      "cruz.png"
-    ] =
-      createPulseGlow(
-        layerMeshes[
-          "cruz.png"
-        ].material.map,
-
-        commonPosition,
-
-        6.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "cruz.png"
-      ]
-    );
-
-    glowMeshes[
-      "corazon-superior.png"
-    ] =
-      createPulseGlow(
-        layerMeshes[
-          "corazon-superior.png"
-        ].material.map,
-
-        commonPosition,
-
-        5.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "corazon-superior.png"
-      ]
-    );
-
-    glowMeshes[
-      "corazon-inferior.png"
-    ] =
-      createPulseGlow(
-        layerMeshes[
-          "corazon-inferior.png"
-        ].material.map,
-
-        commonPosition,
-
-        4.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "corazon-inferior.png"
-      ]
-    );
-
-    glowMeshes[
-      "corazones.png"
-    ] =
-      createPulseGlow(
-        layerMeshes[
-          "corazones.png"
-        ].material.map,
-
-        commonPosition,
-
-        30.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "corazones.png"
-      ]
-    );
-
-    glowMeshes[
-      "destellos.png"
-    ] =
-      createPulseGlow(
-        layerMeshes[
-          "destellos.png"
-        ].material.map,
-
-        commonPosition,
-
-        32.5
-      );
-
-    frontGroup.add(
-      glowMeshes[
-        "destellos.png"
-      ]
-    );
-
-    // ===================================================
-    // HAZ DE MATERIALIZACIÓN
-    // ===================================================
-
-    const revealWave =
-      createRevealWave(
-        commonPosition,
-        45
-      );
-
-    frontGroup.add(
-      revealWave
-    );
-
-    // ===================================================
-    // HALO CRUZ
-    // ===================================================
-
-    const crossHalo =
-      createCrossHalo(
-        commonPosition,
-        6.4
-      );
-
-    frontGroup.add(
-      crossHalo
-    );
-
-    // ===================================================
-    // REVERSO — POR AHORA SOLO FONDO LIMPIO
-    // ===================================================
 
     const backTexture =
       await textureLoader.loadAsync(
@@ -1497,41 +1418,31 @@ async function startAR() {
         transparent:
           true,
 
+        side:
+          THREE.DoubleSide,
+
         depthTest:
           false,
 
         depthWrite:
           false,
 
-        side:
-          THREE.DoubleSide,
-
         opacity:
           1
       });
 
-    const backMesh =
+    backMesh =
       new THREE.Mesh(
-
         new THREE.PlaneGeometry(
           1,
           1.5
         ),
-
         backMaterial
       );
 
     backMesh.position.copy(
       commonPosition
     );
-
-    /*
-     * Compensamos la orientación para que
-     * el reverso no quede visualmente espejado.
-     */
-
-    backMesh.scale.x =
-      -1;
 
     backMesh.renderOrder =
       0;
@@ -1540,51 +1451,262 @@ async function startAR() {
       backMesh
     );
 
-    // ===================================================
-    // OPACIDADES INICIALES
-    // ===================================================
+    /* =====================================================
+       CAPAS
+       ===================================================== */
+
+    const layers = [
+
+      ["fondo-limpio.png", 0],
+
+      ["texto-jesus.png", 1],
+
+      ["pincelada-lila.png", 2],
+
+      ["texto-comunion.png", 3],
+
+      ["corazon-inferior.png", 4],
+
+      ["corazon-superior.png", 5],
+
+      ["cruz.png", 6],
+
+      ["nena-cuerpo.png", 10],
+
+      ["nena-flores.png", 11],
+
+      ["nena-cara.png", 12],
+
+      ["nena-pelo.png", 13],
+
+      ["nena-corona.png", 14],
+
+      ["gatito-superior.png", 20],
+
+      ["gatito-inferior.png", 21],
+
+      ["corazones.png", 30],
+
+      ["estrellas.png", 31],
+
+      ["destellos.png", 32],
+
+      ["marco-corazones.png", 40]
+    ];
 
     for (
-      const file of
-      Object.keys(layerMeshes)
+      const [file, order]
+      of layers
     ) {
 
-      layerMeshes[
-        file
-      ].material.opacity = 0;
+      const texture =
+        await textureLoader.loadAsync(
+          `./assets/animation/${file}`
+        );
+
+      texture.colorSpace =
+        THREE.SRGBColorSpace;
+
+      const material =
+        new THREE.MeshBasicMaterial({
+
+          map: texture,
+
+          transparent: true,
+
+          alphaTest: 0.01,
+
+          depthTest: false,
+
+          depthWrite: false,
+
+          opacity: 1
+        });
+
+      revealMaterial(
+        material
+      );
+
+      const mesh =
+        new THREE.Mesh(
+          new THREE.PlaneGeometry(
+            1,
+            1.5
+          ),
+          material
+        );
+
+      mesh.position.copy(
+        commonPosition
+      );
+
+      mesh.renderOrder =
+        order;
+
+      layerMeshes[file] =
+        mesh;
+
+      visualGroup.add(
+        mesh
+      );
     }
 
-    for (
-      const file of
-      Object.keys(glowMeshes)
+    /* =====================================================
+       BRILLOS
+       ===================================================== */
+
+    function addGlow(
+      file,
+      order,
+      type = "pulse"
     ) {
 
-      glowMeshes[
-        file
-      ].material.opacity = 0;
+      glowMeshes[file] =
+        type === "sweep"
+
+          ? sweepGlow(
+              layerMeshes[file]
+                .material
+                .map,
+
+              order
+            )
+
+          : pulseGlow(
+              layerMeshes[file]
+                .material
+                .map,
+
+              order
+            );
+
+      visualGroup.add(
+        glowMeshes[file]
+      );
     }
 
-    revealWave
-      .material
-      .uniforms
-      .progress
-      .value = -1;
+    addGlow(
+      "texto-jesus.png",
+      1.5,
+      "sweep"
+    );
 
-    revealWave
-      .material
-      .uniforms
-      .intensity
-      .value = 0;
+    addGlow(
+      "texto-comunion.png",
+      3.5,
+      "sweep"
+    );
 
-    crossHalo
-      .material
-      .uniforms
-      .intensity
-      .value = 0;
+    addGlow(
+      "cruz.png",
+      6.5
+    );
 
-    // ===================================================
-    // ESTABILIZADOR
-    // ===================================================
+    addGlow(
+      "corazon-superior.png",
+      5.5
+    );
+
+    addGlow(
+      "corazon-inferior.png",
+      4.5
+    );
+
+    addGlow(
+      "corazones.png",
+      30.5
+    );
+
+    addGlow(
+      "destellos.png",
+      32.5
+    );
+
+    /* =====================================================
+       HAZ ORGÁNICO
+       ===================================================== */
+
+    const revealWave =
+      createRevealWave(
+        45
+      );
+
+    visualGroup.add(
+      revealWave
+    );
+
+    /* =====================================================
+       HALO CRUZ
+       ===================================================== */
+
+    const crossHalo =
+      createCrossHalo(
+        6.4
+      );
+
+    visualGroup.add(
+      crossHalo
+    );
+
+    /* =====================================================
+       OCULTAR TODO
+       ===================================================== */
+
+    Object.values(
+      layerMeshes
+    ).forEach(
+      mesh => {
+
+        mesh.material.opacity =
+          0;
+      }
+    );
+
+    Object.values(
+      glowMeshes
+    ).forEach(
+      mesh => {
+
+        mesh.material.opacity =
+          0;
+      }
+    );
+
+    /* =====================================================
+       ESTADO INICIAL
+       ===================================================== */
+
+    flipState =
+      "front";
+
+    visualGroup.visible =
+      true;
+
+    visualGroup.rotation.y =
+      0;
+
+    backGroup.visible =
+      false;
+
+    backGroup.rotation.y =
+      0;
+
+    createFlipButton();
+
+    hideFlipButton();
+
+    /* =====================================================
+       TRACKING
+       ===================================================== */
+
+    let stabilizerReady =
+      false;
+
+    let foundAt =
+      null;
+
+    let targetVisible =
+      false;
 
     const rawPosition =
       new THREE.Vector3();
@@ -1595,232 +1717,80 @@ async function startAR() {
     const rawScale =
       new THREE.Vector3();
 
-    let stabilizerReady =
-      false;
-
-    const POSITION_RESPONSE =
-      9;
-
-    const ROTATION_RESPONSE =
-      11;
-
-    const SCALE_RESPONSE =
-      9;
-
-    function updateTrackingStabilizer(
-      delta
-    ) {
-
-      anchor.group
-        .updateMatrixWorld(
-          true
-        );
-
-      anchor.group
-        .matrixWorld
-        .decompose(
-
-          rawPosition,
-
-          rawQuaternion,
-
-          rawScale
-        );
-
-      if (
-        !stabilizerReady
-      ) {
-
-        frontGroup.position.copy(
-          rawPosition
-        );
-
-        frontGroup.quaternion.copy(
-          rawQuaternion
-        );
-
-        frontGroup.scale.copy(
-          rawScale
-        );
-
-        backGroup.position.copy(
-          rawPosition
-        );
-
-        backGroup.quaternion.copy(
-          rawQuaternion
-        );
-
-        backGroup.scale.copy(
-          rawScale
-        );
-
-        magicFlip.position.copy(
-          rawPosition
-        );
-
-        magicFlip.quaternion.copy(
-          rawQuaternion
-        );
-
-        magicFlip.scale.copy(
-          rawScale
-        );
-
-        stabilizerReady =
-          true;
-
-        return;
-      }
-
-      const positionAlpha =
-        1 -
-        Math.exp(
-          -POSITION_RESPONSE *
-          delta
-        );
-
-      const rotationAlpha =
-        1 -
-        Math.exp(
-          -ROTATION_RESPONSE *
-          delta
-        );
-
-      const scaleAlpha =
-        1 -
-        Math.exp(
-          -SCALE_RESPONSE *
-          delta
-        );
-
-      frontGroup.position.lerp(
-        rawPosition,
-        positionAlpha
-      );
-
-      frontGroup.quaternion.slerp(
-        rawQuaternion,
-        rotationAlpha
-      );
-
-      frontGroup.scale.lerp(
-        rawScale,
-        scaleAlpha
-      );
-
-      backGroup.position.lerp(
-        rawPosition,
-        positionAlpha
-      );
-
-      backGroup.quaternion.slerp(
-        rawQuaternion,
-        rotationAlpha
-      );
-
-      backGroup.scale.lerp(
-        rawScale,
-        scaleAlpha
-      );
-
-      magicFlip.position.lerp(
-        rawPosition,
-        positionAlpha
-      );
-
-      magicFlip.quaternion.slerp(
-        rawQuaternion,
-        rotationAlpha
-      );
-
-      magicFlip.scale.lerp(
-        rawScale,
-        scaleAlpha
-      );
-    }
-
-    // ===================================================
-    // TRACKING
-    // ===================================================
-
-    let targetFoundTime =
-      null;
-
-    let targetVisible =
-      false;
+    /* =====================================================
+       TARGET ENCONTRADO
+       ===================================================== */
 
     anchor.onTargetFound =
       () => {
 
-        targetFoundTime =
+        foundAt =
           performance.now();
 
         targetVisible =
           true;
 
+        stabilizerReady =
+          false;
+
+        /*
+         * Cada vez que encontramos
+         * nuevamente la estampita,
+         * volvemos al frente.
+         */
+
         if (
-          !flipActive
+          flipState !== "front"
         ) {
 
-          isBack =
-            false;
-
-          frontGroup.visible =
-            true;
-
-          backGroup.visible =
-            false;
-
-          frontGroup.rotation.y =
-            0;
-
-          backGroup.rotation.y =
-            0;
-        }
-
-        for (
-          const file of
-          Object.keys(layerMeshes)
-        ) {
-
-          layerMeshes[
-            file
-          ].material.opacity = 1;
+          flipState =
+            "front";
 
           if (
-            layerMeshes[
-              file
-            ].material.userData
-              .revealUniforms
+            visualGroup
           ) {
 
-            layerMeshes[
-              file
-            ].material.userData
-              .revealUniforms
-              .revealProgress
-              .value = 1.1;
+            visualGroup.rotation.y =
+              0;
+
+            visualGroup.visible =
+              true;
+          }
+
+          if (
+            backGroup
+          ) {
+
+            backGroup.visible =
+              false;
+
+            backGroup.rotation.y =
+              0;
           }
         }
+
+        hideFlipButton();
 
         revealWave
           .material
           .uniforms
           .progress
-          .value = -1;
+          .value =
+          1.1;
 
         revealWave
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         crossHalo
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         status.textContent =
           "¡La estampita cobró vida!";
@@ -1828,14 +1798,16 @@ async function startAR() {
         status.classList.remove(
           "hidden"
         );
-
-        updateFlipButton();
       };
+
+    /* =====================================================
+       TARGET PERDIDO
+       ===================================================== */
 
     anchor.onTargetLost =
       () => {
 
-        targetFoundTime =
+        foundAt =
           null;
 
         targetVisible =
@@ -1844,60 +1816,76 @@ async function startAR() {
         stabilizerReady =
           false;
 
-        flipActive =
+        stabilizedGroup.visible =
           false;
 
-        isBack =
-          false;
+        /*
+         * Si se pierde la estampita,
+         * se cancela cualquier giro.
+         */
 
-        frontGroup.visible =
-          false;
+        flipState =
+          "front";
 
-        backGroup.visible =
-          false;
-
-        magicFlip.visible =
-          false;
-
-        for (
-          const file of
-          Object.keys(layerMeshes)
+        if (
+          visualGroup
         ) {
 
-          layerMeshes[
-            file
-          ].material.opacity = 0;
+          visualGroup.rotation.y =
+            0;
+
+          visualGroup.visible =
+            true;
         }
 
-        for (
-          const file of
-          Object.keys(glowMeshes)
+        if (
+          backGroup
         ) {
 
-          glowMeshes[
-            file
-          ].material.opacity = 0;
+          backGroup.visible =
+            false;
+
+          backGroup.rotation.y =
+            0;
         }
 
-        revealWave
-          .material
-          .uniforms
-          .progress
-          .value = -1;
+        clearFlipMagic();
+
+        hideFlipButton();
+
+        Object.values(
+          layerMeshes
+        ).forEach(
+          mesh => {
+
+            mesh.material.opacity =
+              0;
+          }
+        );
+
+        Object.values(
+          glowMeshes
+        ).forEach(
+          mesh => {
+
+            mesh.material.opacity =
+              0;
+          }
+        );
 
         revealWave
           .material
           .uniforms
           .intensity
-          .value = 0;
+          .value =
+          0;
 
         crossHalo
           .material
           .uniforms
           .intensity
-          .value = 0;
-
-        updateFlipButton();
+          .value =
+          0;
 
         status.textContent =
           "Apuntá la cámara a la estampita";
@@ -1906,10 +1894,6 @@ async function startAR() {
           "hidden"
         );
       };
-
-    // ===================================================
-    // ARRANQUE
-    // ===================================================
 
     status.textContent =
       "Preparando cámara…";
@@ -1931,9 +1915,9 @@ async function startAR() {
     status.textContent =
       "Apuntá la cámara a la estampita";
 
-    // ===================================================
-    // LOOP
-    // ===================================================
+    /* =====================================================
+       LOOP
+       ===================================================== */
 
     const clock =
       new THREE.Clock();
@@ -1950,85 +1934,136 @@ async function startAR() {
         const time =
           clock.elapsedTime;
 
-        // -----------------------------------------------
-        // TRACKING
-        // -----------------------------------------------
-
-        if (
-          targetVisible
-        ) {
-
-          frontGroup.visible =
-            !isBack ||
-            flipActive;
-
-          backGroup.visible =
-            isBack &&
-            !flipActive;
-
-          updateTrackingStabilizer(
-            delta
-          );
-
-        } else {
-
-          frontGroup.visible =
-            false;
-
-          backGroup.visible =
-            false;
-
-          magicFlip.visible =
-            false;
-
-          stabilizerReady =
-            false;
-        }
-
-        // -----------------------------------------------
-        // TIEMPO DE APARICIÓN
-        // -----------------------------------------------
-
         let elapsed =
           999;
 
         if (
-          targetFoundTime !== null
+          foundAt !== null
         ) {
 
           elapsed =
             (
               performance.now() -
-              targetFoundTime
-            ) / 1000;
+              foundAt
+            ) /
+            1000;
         }
 
-        // -----------------------------------------------
-        // MATERIALIZACIÓN
-        // -----------------------------------------------
+        /* =================================================
+           ESTABILIZADOR
+           ================================================= */
+
+        if (
+          targetVisible
+        ) {
+
+          stabilizedGroup.visible =
+            true;
+
+          anchor.group
+            .updateMatrixWorld(
+              true
+            );
+
+          anchor.group
+            .matrixWorld
+            .decompose(
+              rawPosition,
+              rawQuaternion,
+              rawScale
+            );
+
+          if (
+            !stabilizerReady
+          ) {
+
+            stabilizedGroup
+              .position
+              .copy(
+                rawPosition
+              );
+
+            stabilizedGroup
+              .quaternion
+              .copy(
+                rawQuaternion
+              );
+
+            stabilizedGroup
+              .scale
+              .copy(
+                rawScale
+              );
+
+            stabilizerReady =
+              true;
+
+          } else {
+
+            stabilizedGroup
+              .position
+              .lerp(
+                rawPosition,
+                1 -
+                Math.exp(
+                  -9 *
+                  delta
+                )
+              );
+
+            stabilizedGroup
+              .quaternion
+              .slerp(
+                rawQuaternion,
+                1 -
+                Math.exp(
+                  -11 *
+                  delta
+                )
+              );
+
+            stabilizedGroup
+              .scale
+              .lerp(
+                rawScale,
+                1 -
+                Math.exp(
+                  -9 *
+                  delta
+                )
+              );
+          }
+        }
+
+        /* =================================================
+           REVELACIÓN ORGÁNICA
+           ================================================= */
 
         if (
           targetVisible &&
-          !isBack &&
-          !flipActive
+          flipState === "front"
         ) {
 
           const revealStart =
-            0.62;
+            0.45;
 
           const revealDuration =
-            3.20;
+            3.50;
 
-          let revealProgress =
-            1.1;
+          let revealProgress;
 
           if (
-            elapsed >=
+            elapsed <
             revealStart
           ) {
 
-            const revealT =
-              clamp01(
+            revealProgress =
+              1.10;
+
+          } else {
+
+            const p =
+              clamp(
                 (
                   elapsed -
                   revealStart
@@ -2038,430 +2073,37 @@ async function startAR() {
 
             revealProgress =
               1.08 -
-              easeInOut(
-                revealT
-              ) *
+              smooth(p) *
               1.16;
           }
 
-          for (
-            const file of
-            Object.keys(layerMeshes)
-          ) {
+          Object.values(
+            layerMeshes
+          ).forEach(
+            mesh => {
 
-            const material =
-              layerMeshes[
-                file
-              ].material;
+              mesh.material.opacity =
+                1;
 
-            material.opacity =
-              1;
+              if (
+                mesh.material
+                  .userData
+                  .revealUniforms
+              ) {
 
-            if (
-              material.userData
-                .revealUniforms
-            ) {
-
-              material.userData
-                .revealUniforms
-                .revealProgress
-                .value =
-                revealProgress;
-            }
-          }
-
-          // -------------------------------------------
-          // FONDO
-          // -------------------------------------------
-
-          layerMeshes[
-            "fondo-limpio.png"
-          ].material.opacity =
-            easeOutCubic(
-              elapsed / 0.35
-            );
-
-          // -------------------------------------------
-          // NIÑA
-          // -------------------------------------------
-
-          const girlProgress =
-            easeOutCubic(
-              (
-                elapsed -
-                0.12
-              ) / 0.70
-            );
-
-          [
-            "nena-cuerpo.png",
-            "nena-flores.png",
-            "nena-cara.png",
-            "nena-pelo.png",
-            "nena-corona.png"
-          ].forEach(
-            file => {
-
-              layerMeshes[
-                file
-              ].material.opacity =
-                girlProgress;
+                mesh.material
+                  .userData
+                  .revealUniforms
+                  .revealProgress
+                  .value =
+                  revealProgress;
+              }
             }
           );
 
-          // -------------------------------------------
-          // GATITOS
-          // -------------------------------------------
-
-          const catProgress =
-            easeOutCubic(
-              (
-                elapsed -
-                0.30
-              ) / 0.70
-            );
-
-          [
-            "gatito-superior.png",
-            "gatito-inferior.png"
-          ].forEach(
-            file => {
-
-              layerMeshes[
-                file
-              ].material.opacity =
-                catProgress;
-            }
-          );
-
-          // -------------------------------------------
-          // PINCELADA
-          // -------------------------------------------
-
-          layerMeshes[
-            "pincelada-lila.png"
-          ].material.opacity =
-            easeOutCubic(
-              (
-                elapsed -
-                0.05
-              ) / 0.55
-            );
-
-          // -------------------------------------------
-          // TEXTOS
-          // -------------------------------------------
-
-          layerMeshes[
-            "texto-comunion.png"
-          ].material.opacity =
-            easeOutCubic(
-              (
-                elapsed -
-                0.18
-              ) / 0.85
-            );
-
-          layerMeshes[
-            "texto-jesus.png"
-          ].material.opacity =
-            easeOutCubic(
-              (
-                elapsed -
-                0.35
-              ) / 0.85
-            );
-
-          // -------------------------------------------
-          // CRUZ
-          // -------------------------------------------
-
-          layerMeshes[
-            "cruz.png"
-          ].material.opacity =
-            easeOutCubic(
-              (
-                elapsed -
-                0.20
-              ) / 0.65
-            );
-
-          // -------------------------------------------
-          // CORAZONES
-          // -------------------------------------------
-
-          const heartProgress =
-            easeOutCubic(
-              (
-                elapsed -
-                0.25
-              ) / 0.65
-            );
-
-          layerMeshes[
-            "corazon-superior.png"
-          ].material.opacity =
-            heartProgress;
-
-          layerMeshes[
-            "corazon-inferior.png"
-          ].material.opacity =
-            heartProgress;
-
-          // -------------------------------------------
-          // DECORACIÓN
-          // -------------------------------------------
-
-          const decorationProgress =
-            easeOutCubic(
-              (
-                elapsed -
-                0.30
-              ) / 0.75
-            );
-
-          [
-            "corazones.png",
-            "estrellas.png",
-            "destellos.png",
-            "marco-corazones.png"
-          ].forEach(
-            file => {
-
-              layerMeshes[
-                file
-              ].material.opacity =
-                decorationProgress;
-            }
-          );
-        }
-
-        // =================================================
-        // MOVIMIENTO SUTIL
-        // =================================================
-
-        const hair =
-          layerMeshes[
-            "nena-pelo.png"
-          ];
-
-        if (hair) {
-
-          hair.position.x =
-            commonPosition.x +
-            Math.sin(
-              time * 1.2
-            ) *
-            0.004;
-
-          hair.position.y =
-            commonPosition.y +
-            Math.sin(
-              time * 1.5
-            ) *
-            0.002;
-        }
-
-        const crown =
-          layerMeshes[
-            "nena-corona.png"
-          ];
-
-        if (crown) {
-
-          crown.position.x =
-            commonPosition.x +
-            Math.sin(
-              time * 1.2 +
-              0.3
-            ) *
-            0.003;
-
-          crown.position.y =
-            commonPosition.y +
-            Math.sin(
-              time * 1.5 +
-              0.3
-            ) *
-            0.0015;
-
-          crown.rotation.z =
-            Math.sin(
-              time * 1.1
-            ) *
-            0.008;
-        }
-
-        const catTop =
-          layerMeshes[
-            "gatito-superior.png"
-          ];
-
-        if (catTop) {
-
-          catTop.position.x =
-            commonPosition.x +
-            Math.sin(
-              time * 0.75 +
-              1.5
-            ) *
-            0.003;
-
-          catTop.position.y =
-            commonPosition.y +
-            Math.sin(
-              time * 1.0 +
-              0.5
-            ) *
-            0.004;
-        }
-
-        const catBottom =
-          layerMeshes[
-            "gatito-inferior.png"
-          ];
-
-        if (catBottom) {
-
-          catBottom.position.x =
-            commonPosition.x +
-            Math.sin(
-              time * 0.65 +
-              3.0
-            ) *
-            0.0025;
-
-          catBottom.position.y =
-            commonPosition.y +
-            Math.sin(
-              time * 0.9 +
-              2.0
-            ) *
-            0.0035;
-        }
-
-        // =================================================
-        // CORAZONES
-        // =================================================
-
-        const decorativeHearts =
-          layerMeshes[
-            "corazones.png"
-          ];
-
-        const decorativeHeartGlow =
-          glowMeshes[
-            "corazones.png"
-          ];
-
-        if (
-          decorativeHearts &&
-          decorativeHeartGlow &&
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
-
-          const beat =
-            doubleBeat(
-              time,
-              4.6,
-              0.4
-            );
-
-          decorativeHearts
-            .material
-            .opacity =
-            0.82 +
-            beat *
-            0.18;
-
-          decorativeHeartGlow
-            .material
-            .opacity =
-            beat *
-            0.48;
-        }
-
-        const heartTop =
-          layerMeshes[
-            "corazon-superior.png"
-          ];
-
-        const heartTopGlow =
-          glowMeshes[
-            "corazon-superior.png"
-          ];
-
-        if (
-          heartTop &&
-          heartTopGlow &&
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
-
-          const beat =
-            doubleBeat(
-              time,
-              4.0,
-              0
-            );
-
-          heartTop.material.opacity =
-            0.84 +
-            beat *
-            0.16;
-
-          heartTopGlow.material.opacity =
-            beat *
-            0.42;
-        }
-
-        const heartBottom =
-          layerMeshes[
-            "corazon-inferior.png"
-          ];
-
-        const heartBottomGlow =
-          glowMeshes[
-            "corazon-inferior.png"
-          ];
-
-        if (
-          heartBottom &&
-          heartBottomGlow &&
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
-
-          const beat =
-            doubleBeat(
-              time,
-              4.0,
-              1.8
-            );
-
-          heartBottom.material.opacity =
-            0.84 +
-            beat *
-            0.16;
-
-          heartBottomGlow.material.opacity =
-            beat *
-            0.42;
-        }
-
-        // =================================================
-        // CRUZ + HAZ DE MATERIALIZACIÓN
-        // =================================================
-
-        if (
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
+          /* =================================================
+             CRUZ
+             ================================================= */
 
           const cross =
             layerMeshes[
@@ -2492,7 +2134,7 @@ async function startAR() {
 
             ignition =
               Math.sin(
-                easeInOut(p) *
+                smooth(p) *
                 Math.PI
               );
 
@@ -2507,7 +2149,7 @@ async function startAR() {
               0.42 *
               (
                 1 -
-                easeOutCubic(
+                ease(
                   (
                     elapsed -
                     1.30
@@ -2521,7 +2163,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 0.75
+                  time *
+                  0.75
                 ) +
                 1
               ) /
@@ -2530,29 +2173,23 @@ async function startAR() {
             ) *
             0.10;
 
-          if (cross) {
+          cross.material.opacity =
+            Math.max(
+              cross.material.opacity,
+              0.82 +
+              ignition *
+              0.18 +
+              ambientPulse
+            );
 
-            cross.material.opacity =
-              Math.max(
-                cross.material.opacity,
-                0.82 +
-                ignition *
-                0.18 +
-                ambientPulse
-              );
-          }
-
-          if (crossGlow) {
-
-            crossGlow.material.opacity =
-              Math.min(
-                1,
-                ignition *
-                1.15 +
-                ambientPulse *
-                0.5
-              );
-          }
+          crossGlow.material.opacity =
+            Math.min(
+              1,
+              ignition *
+              1.15 +
+              ambientPulse *
+              0.5
+            );
 
           crossHalo
             .material
@@ -2565,26 +2202,25 @@ async function startAR() {
               1.25
             );
 
-          // ---------------------------------------------
-          // HAZ ORGÁNICO
-          // ---------------------------------------------
+          /* =================================================
+             HAZ DE LUZ
+             ================================================= */
 
           if (
             elapsed >=
-              0.50 &&
+              0.45 &&
             elapsed <=
-              2.15
+              3.95
           ) {
 
             const p =
-              (
-                elapsed -
-                0.50
-              ) /
-              1.65;
-
-            const wave =
-              easeInOut(p);
+              clamp(
+                (
+                  elapsed -
+                  0.45
+                ) /
+                3.50
+              );
 
             revealWave
               .material
@@ -2592,22 +2228,19 @@ async function startAR() {
               .progress
               .value =
               1.02 -
-              wave *
-              1.22;
-
-            const edge =
-              Math.sin(
-                p *
-                Math.PI
-              );
+              smooth(p) *
+              1.18;
 
             revealWave
               .material
               .uniforms
               .intensity
               .value =
-              0.78 *
-              edge;
+              0.95 *
+              Math.sin(
+                p *
+                Math.PI
+              );
 
           } else {
 
@@ -2618,35 +2251,234 @@ async function startAR() {
               .value =
               0;
           }
-        }
 
-        // =================================================
-        // DESTELLOS
-        // =================================================
+          /* =================================================
+             PELO
+             ================================================= */
 
-        const sparkles =
-          layerMeshes[
-            "destellos.png"
-          ];
+          const hair =
+            layerMeshes[
+              "nena-pelo.png"
+            ];
 
-        const sparkleGlow =
-          glowMeshes[
-            "destellos.png"
-          ];
+          hair.position.x =
+            commonPosition.x +
+            Math.sin(
+              time *
+              1.2
+            ) *
+            0.004;
 
-        if (
-          sparkles &&
-          sparkleGlow &&
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
+          hair.position.y =
+            commonPosition.y +
+            Math.sin(
+              time *
+              1.5
+            ) *
+            0.002;
+
+          /* =================================================
+             CORONA
+             ================================================= */
+
+          const crown =
+            layerMeshes[
+              "nena-corona.png"
+            ];
+
+          crown.position.x =
+            commonPosition.x +
+            Math.sin(
+              time *
+              1.2 +
+              0.3
+            ) *
+            0.003;
+
+          crown.position.y =
+            commonPosition.y +
+            Math.sin(
+              time *
+              1.5 +
+              0.3
+            ) *
+            0.0015;
+
+          crown.rotation.z =
+            Math.sin(
+              time *
+              1.1
+            ) *
+            0.008;
+
+          /* =================================================
+             GATITO SUPERIOR
+             ================================================= */
+
+          const catTop =
+            layerMeshes[
+              "gatito-superior.png"
+            ];
+
+          catTop.position.x =
+            commonPosition.x +
+            Math.sin(
+              time *
+              0.75 +
+              1.5
+            ) *
+            0.003;
+
+          catTop.position.y =
+            commonPosition.y +
+            Math.sin(
+              time *
+              1.0 +
+              0.5
+            ) *
+            0.004;
+
+          /* =================================================
+             GATITO INFERIOR
+             ================================================= */
+
+          const catBottom =
+            layerMeshes[
+              "gatito-inferior.png"
+            ];
+
+          catBottom.position.x =
+            commonPosition.x +
+            Math.sin(
+              time *
+              0.65 +
+              3.0
+            ) *
+            0.0025;
+
+          catBottom.position.y =
+            commonPosition.y +
+            Math.sin(
+              time *
+              0.9 +
+              2.0
+            ) *
+            0.0035;
+
+          /* =================================================
+             CORAZONES
+             ================================================= */
+
+          const decorativeHearts =
+            layerMeshes[
+              "corazones.png"
+            ];
+
+          const decorativeHeartGlow =
+            glowMeshes[
+              "corazones.png"
+            ];
+
+          const beat =
+            doubleBeat(
+              time,
+              4.6,
+              0.4
+            );
+
+          decorativeHearts
+            .material
+            .opacity =
+            0.82 +
+            beat *
+            0.18;
+
+          decorativeHeartGlow
+            .material
+            .opacity =
+            beat *
+            0.48;
+
+          /* =================================================
+             CORAZÓN SUPERIOR
+             ================================================= */
+
+          const topHeart =
+            layerMeshes[
+              "corazon-superior.png"
+            ];
+
+          const topHeartGlow =
+            glowMeshes[
+              "corazon-superior.png"
+            ];
+
+          const topBeat =
+            doubleBeat(
+              time,
+              4.0,
+              0
+            );
+
+          topHeart.material.opacity =
+            0.84 +
+            topBeat *
+            0.16;
+
+          topHeartGlow.material.opacity =
+            topBeat *
+            0.42;
+
+          /* =================================================
+             CORAZÓN INFERIOR
+             ================================================= */
+
+          const bottomHeart =
+            layerMeshes[
+              "corazon-inferior.png"
+            ];
+
+          const bottomHeartGlow =
+            glowMeshes[
+              "corazon-inferior.png"
+            ];
+
+          const bottomBeat =
+            doubleBeat(
+              time,
+              4.0,
+              1.8
+            );
+
+          bottomHeart.material.opacity =
+            0.84 +
+            bottomBeat *
+            0.16;
+
+          bottomHeartGlow.material.opacity =
+            bottomBeat *
+            0.42;
+
+          /* =================================================
+             DESTELLOS
+             ================================================= */
+
+          const sparkles =
+            layerMeshes[
+              "destellos.png"
+            ];
+
+          const sparkleGlow =
+            glowMeshes[
+              "destellos.png"
+            ];
 
           const wave1 =
             Math.pow(
               (
                 Math.sin(
-                  time * 1.8
+                  time *
+                  1.8
                 ) +
                 1
               ) /
@@ -2658,7 +2490,8 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 3.1 +
+                  time *
+                  3.1 +
                   1.7
                 ) +
                 1
@@ -2671,8 +2504,9 @@ async function startAR() {
             Math.pow(
               (
                 Math.sin(
-                  time * 4.7 +
-                  3.0
+                  time *
+                  4.7 +
+                  3
                 ) +
                 1
               ) /
@@ -2681,10 +2515,12 @@ async function startAR() {
             );
 
           const sparkle =
-            clamp01(
+            clamp(
               wave1 +
-              wave2 * 0.65 +
-              wave3 * 0.45
+              wave2 *
+              0.65 +
+              wave3 *
+              0.45
             );
 
           sparkles.material.opacity =
@@ -2696,29 +2532,22 @@ async function startAR() {
             0.08 +
             sparkle *
             0.90;
-        }
 
-        // =================================================
-        // ESTRELLAS
-        // =================================================
+          /* =================================================
+             ESTRELLAS
+             ================================================= */
 
-        const stars =
-          layerMeshes[
-            "estrellas.png"
-          ];
-
-        if (
-          stars &&
-          targetVisible &&
-          !isBack &&
-          !flipActive
-        ) {
+          const stars =
+            layerMeshes[
+              "estrellas.png"
+            ];
 
           const starWave =
             Math.pow(
               (
                 Math.sin(
-                  time * 1.25 +
+                  time *
+                  1.25 +
                   0.8
                 ) +
                 1
@@ -2731,138 +2560,130 @@ async function startAR() {
             0.68 +
             starWave *
             0.32;
-        }
 
-        // =================================================
-        // BRILLO DE TEXTOS
-        // =================================================
+          /* =================================================
+             TEXTOS
+             ================================================= */
 
-        const jesusGlow =
-          glowMeshes[
-            "texto-jesus.png"
-          ];
-
-        const communionGlow =
-          glowMeshes[
-            "texto-comunion.png"
-          ];
-
-        function updateTextSweep(
-          glow,
-          startDelay,
-          cycleLength,
-          duration
-        ) {
-
-          if (
-            !glow ||
-            !targetVisible ||
-            isBack ||
-            flipActive ||
-            elapsed <
-              startDelay
+          function textSweep(
+            glow,
+            delay
           ) {
 
-            if (glow)
+            if (
+              elapsed <
+              delay
+            ) {
+
               glow.material.opacity =
                 0;
 
-            return;
+              return;
+            }
+
+            const cycle =
+              (
+                elapsed -
+                delay
+              ) %
+              6.5;
+
+            if (
+              cycle <
+              1.15
+            ) {
+
+              const p =
+                cycle /
+                1.15;
+
+              const intensity =
+                Math.sin(
+                  p *
+                  Math.PI
+                );
+
+              glow
+                .material
+                .uniforms
+                .progress
+                .value =
+                -0.15 +
+                p *
+                1.30;
+
+              glow
+                .material
+                .uniforms
+                .strength
+                .value =
+                0.85 +
+                intensity *
+                0.65;
+
+              glow.material.opacity =
+                0.35 +
+                intensity *
+                0.65;
+
+            } else {
+
+              glow.material.opacity =
+                0;
+            }
           }
 
-          const localTime =
-            elapsed -
-            startDelay;
+          textSweep(
+            glowMeshes[
+              "texto-comunion.png"
+            ],
+            2.05
+          );
 
-          const cycle =
-            localTime %
-            cycleLength;
-
-          if (
-            cycle >= 0 &&
-            cycle <
-              duration
-          ) {
-
-            const progress =
-              cycle /
-              duration;
-
-            glow.material
-              .uniforms
-              .progress
-              .value =
-              -0.15 +
-              progress *
-              1.30;
-
-            const intensity =
-              Math.sin(
-                progress *
-                Math.PI
-              );
-
-            glow.material
-              .uniforms
-              .strength
-              .value =
-              0.85 +
-              intensity *
-              0.65;
-
-            glow.material.opacity =
-              0.35 +
-              intensity *
-              0.65;
-
-          } else {
-
-            glow.material.opacity =
-              0;
-          }
-        }
-
-        updateTextSweep(
-          communionGlow,
-          2.05,
-          6.5,
-          1.15
-        );
-
-        updateTextSweep(
-          jesusGlow,
-          3.55,
-          6.5,
-          1.15
-        );
-
-        // =================================================
-        // GIRO
-        // =================================================
-
-        if (
-          flipActive
-        ) {
-
-          updateFlipAnimation(
-            delta
+          textSweep(
+            glowMeshes[
+              "texto-jesus.png"
+            ],
+            3.55
           );
         }
 
-        // =================================================
-        // BOTÓN
-        // =================================================
+        /* =================================================
+           GIRO
+           ================================================= */
+
+        updateFlip();
 
         if (
-          targetVisible
+          flipState === "flipping"
         ) {
 
-          updateFlipButton();
+          updateFlipMagic(
+            (
+              performance.now() -
+              flipStartTime
+            ) /
+            1000,
+            time
+          );
         }
 
-        // =================================================
-        // RENDER
-        // =================================================
+        /* =================================================
+           MOSTRAR BOTÓN
+           ================================================= */
+
+        if (
+          targetVisible &&
+          flipState === "front" &&
+          elapsed > 4.20 &&
+          flipButton &&
+          flipButton.style.pointerEvents !== "auto"
+        ) {
+
+          showFlipButton(
+            "Ver reverso"
+          );
+        }
 
         renderer.render(
           scene,
@@ -2878,11 +2699,11 @@ async function startAR() {
       error
     );
 
-    if (
-      mindarThree
-    ) {
+    try {
 
-      try {
+      if (
+        mindarThree
+      ) {
 
         mindarThree.stop();
 
@@ -2891,9 +2712,9 @@ async function startAR() {
           .setAnimationLoop(
             null
           );
+      }
 
-      } catch (e) {}
-    }
+    } catch (e) {}
 
     mindarThree =
       null;
@@ -2920,15 +2741,13 @@ async function startAR() {
   }
 }
 
-// =====================================================
-// DETENER AR
-// =====================================================
+/* =========================================================
+   DETENER AR
+   ========================================================= */
 
 function stopAR() {
 
-  if (
-    !mindarThree
-  )
+  if (!mindarThree)
     return;
 
   mindarThree.stop();
@@ -2957,43 +2776,40 @@ function stopAR() {
   startButton.textContent =
     "Comenzar";
 
-  if (flipButton) {
+  clearFlipMagic();
 
-    flipButton.style.display =
-      "none";
+  if (
+    flipButton
+  ) {
+
+    flipButton.remove();
+
+    flipButton =
+      null;
   }
 
   mindarThree =
     null;
 
-  layerMeshes =
-    {};
+  layerMeshes = {};
+  glowMeshes = {};
 
-  glowMeshes =
-    {};
-
-  frontGroup =
+  visualGroup =
     null;
 
   backGroup =
     null;
 
-  magicFlip =
+  backMesh =
     null;
 
-  flipButton =
-    null;
-
-  isBack =
-    false;
-
-  flipActive =
-    false;
+  flipState =
+    "front";
 }
 
-// =====================================================
-// EVENTOS
-// =====================================================
+/* =========================================================
+   BOTONES
+   ========================================================= */
 
 startButton.addEventListener(
   "click",
