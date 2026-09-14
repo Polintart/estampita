@@ -914,6 +914,22 @@ async function startAR() {
 
 
   // ==========================================================
+  // ABRIR CÁMARA INMEDIATAMENTE
+  // ==========================================================
+
+  await mindarThree.start();
+
+  if (startScreen) {
+    startScreen.style.display =
+      "none";
+  }
+
+  setStatus(
+    "Preparando la estampita…"
+  );
+
+
+  // ==========================================================
   // ESTRUCTURA
   // ==========================================================
 
@@ -1072,9 +1088,6 @@ async function startAR() {
             THREE.DoubleSide
         });
 
-      // IMPORTANTE:
-      // El revelado se aplica a todas las capas,
-      // pero su progreso ahora se actualiza correctamente.
       applyRevealMask(
         material
       );
@@ -1800,18 +1813,6 @@ async function startAR() {
 
 
   animate();
-
-
-  // ==========================================================
-  // START
-  // ==========================================================
-
-  await mindarThree.start();
-
-  if (startScreen) {
-    startScreen.style.display =
-      "none";
-  }
 
   setStatus(
     "Apuntá a la estampita"
