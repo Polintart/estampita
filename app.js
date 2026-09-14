@@ -6,21 +6,34 @@ const startButton = document.querySelector("#start-button");
 const stopButton = document.querySelector("#stop-button");
 const status = document.querySelector("#status");
 
+const flipButton =
+  document.querySelector("#flip-button");
+
 let mindarThree = null;
 let layerMeshes = {};
 let glowMeshes = {};
 
-const commonPosition = new THREE.Vector3(-0.02, 0, 0.02);
+const commonPosition =
+  new THREE.Vector3(-0.02, 0, 0.02);
 
-const clamp = v => Math.max(0, Math.min(1, v));
+const clamp = v =>
+  Math.max(0, Math.min(1, v));
 
 function ease(v) {
+
   v = clamp(v);
-  return 1 - Math.pow(1 - v, 3);
+
+  return 1 -
+    Math.pow(
+      1 - v,
+      3
+    );
 }
 
 function smooth(v) {
+
   v = clamp(v);
+
   return v * v * (3 - 2 * v);
 }
 
@@ -30,90 +43,79 @@ function smooth(v) {
 
 function revealMaterial(material) {
 
-  material.userData.revealProgress = 1.1;
+  material.userData.revealProgress =
+    1.1;
 
-  material.userData.revealUniforms = null;
+  material.userData.revealUniforms =
+    null;
 
-  material.onBeforeCompile = shader => {
+  material.onBeforeCompile =
+    shader => {
 
-    shader.uniforms.revealProgress = {
-      value: 1.1
+      shader.uniforms.revealProgress = {
+        value: 1.1
+      };
+
+      material.userData.revealUniforms =
+        shader.uniforms;
+
+      shader.fragmentShader =
+        "uniform float revealProgress;\n" +
+        shader.fragmentShader.replace(
+          "#include <alphatest_fragment>",
+          `
+          float organicWave =
+            sin(vMapUv.x * 8.0 +
+                revealProgress * 5.0) * 0.018;
+
+          organicWave +=
+            sin(vMapUv.x * 17.0 -
+                revealProgress * 7.0) * 0.012;
+
+          organicWave +=
+            sin(vMapUv.x * 31.0 +
+                revealProgress * 3.0) * 0.007;
+
+          organicWave +=
+            sin(vMapUv.x * 4.5 +
+                revealProgress * 11.0) * 0.020;
+
+          float organicY =
+            sin(vMapUv.y * 18.0 +
+                vMapUv.x * 9.0) * 0.006;
+
+          float revealEdge =
+            revealProgress +
+            organicWave +
+            organicY;
+
+          float revealAmount =
+            smoothstep(
+              revealEdge - 0.030,
+              revealEdge + 0.030,
+              vMapUv.y
+            );
+
+          diffuseColor.a *=
+            revealAmount;
+
+          #include <alphatest_fragment>
+          `
+        );
     };
 
-    material.userData.revealUniforms =
-      shader.uniforms;
-
-    shader.fragmentShader =
-      "uniform float revealProgress;\n" +
-      shader.fragmentShader.replace(
-        "#include <alphatest_fragment>",
-        `
-        /*
-         * Borde orgánico.
-         *
-         * No es una línea perfectamente horizontal:
-         * tiene pequeñas ondulaciones y variaciones
-         * naturales a lo largo del ancho.
-         */
-
-        float organicWave =
-          sin(vMapUv.x * 8.0 +
-              revealProgress * 5.0) * 0.018;
-
-        organicWave +=
-          sin(vMapUv.x * 17.0 -
-              revealProgress * 7.0) * 0.012;
-
-        organicWave +=
-          sin(vMapUv.x * 31.0 +
-              revealProgress * 3.0) * 0.007;
-
-        organicWave +=
-          sin(vMapUv.x * 4.5 +
-              revealProgress * 11.0) * 0.020;
-
-        /*
-         * Pequeña irregularidad vertical.
-         */
-
-        float organicY =
-          sin(vMapUv.y * 18.0 +
-              vMapUv.x * 9.0) * 0.006;
-
-        float revealEdge =
-          revealProgress +
-          organicWave +
-          organicY;
-
-        /*
-         * Borde suave.
-         * Esto hace que la imagen se materialice
-         * progresivamente en lugar de aparecer cortada.
-         */
-
-        float revealAmount =
-          smoothstep(
-            revealEdge - 0.030,
-            revealEdge + 0.030,
-            vMapUv.y
-          );
-
-        diffuseColor.a *=
-          revealAmount;
-
-        #include <alphatest_fragment>
-        `
-      );
-  };
-
-  material.needsUpdate = true;
+  material.needsUpdate =
+    true;
 }
 
 /* =========================================================
    BRILLO DE TEXTO
    ========================================================= */
 
-function sweepGlow(texture, renderOrder) {
+function sweepGlow(
+  texture,
+  renderOrder
+) {
 
   const material =
     new THREE.ShaderMaterial({
@@ -317,11 +319,6 @@ function createRevealWave(
 
         void main() {
 
-          /*
-           * El mismo movimiento orgánico
-           * que utiliza la máscara.
-           */
-
           float organicWave =
             sin(vUv.x * 8.0 +
                 progress * 5.0) * 0.018;
@@ -348,10 +345,6 @@ function createRevealWave(
               organicEdge
             );
 
-          /*
-           * Núcleo brillante.
-           */
-
           float core =
             1.0 -
             smoothstep(
@@ -359,10 +352,6 @@ function createRevealWave(
               width,
               distanceFromEdge
             );
-
-          /*
-           * Halo más amplio.
-           */
 
           float halo =
             1.0 -
@@ -372,11 +361,6 @@ function createRevealWave(
               distanceFromEdge
             );
 
-          /*
-           * Variación de intensidad
-           * a lo largo del haz.
-           */
-
           float variation =
             0.78 +
             0.22 *
@@ -384,10 +368,6 @@ function createRevealWave(
               vUv.x * 12.0 +
               progress * 8.0
             );
-
-          /*
-           * Centro amarillo cálido.
-           */
 
           vec3 warmLight =
             mix(
@@ -514,10 +494,6 @@ function createCrossHalo(
               -d * 7.0
             );
 
-          /*
-           * Amarillo cálido.
-           */
-
           vec3 warm =
             vec3(
               1.0,
@@ -625,6 +601,19 @@ async function startAR() {
 
   startButton.textContent =
     "Abriendo cámara…";
+
+  if (flipButton) {
+
+    flipButton.classList.add(
+      "hidden"
+    );
+
+    flipButton.disabled =
+      false;
+
+    flipButton.textContent =
+      "Voltear";
+  }
 
   try {
 
@@ -805,6 +794,61 @@ async function startAR() {
     }
 
     /* =====================================================
+       REVERSO TEMPORAL
+       ===================================================== */
+
+    const backTexture =
+      await textureLoader.loadAsync(
+        "./assets/animation/fondo-limpio.png"
+      );
+
+    backTexture.colorSpace =
+      THREE.SRGBColorSpace;
+
+    const backMaterial =
+      new THREE.MeshBasicMaterial({
+
+        map: backTexture,
+
+        transparent: true,
+
+        depthTest: false,
+
+        depthWrite: false,
+
+        side: THREE.DoubleSide
+      });
+
+    const backMesh =
+      new THREE.Mesh(
+        new THREE.PlaneGeometry(
+          1,
+          1.5
+        ),
+        backMaterial
+      );
+
+    /*
+     * El reverso mira hacia atrás.
+     * Cuando la estampita gira 180°,
+     * este plano queda visible.
+     */
+
+    backMesh.rotation.y =
+      Math.PI;
+
+    backMesh.position.copy(
+      commonPosition
+    );
+
+    backMesh.renderOrder =
+      0;
+
+    stabilizedGroup.add(
+      backMesh
+    );
+
+    /* =====================================================
        BRILLOS
        ===================================================== */
 
@@ -925,6 +969,79 @@ async function startAR() {
       }
     );
 
+    backMesh.visible =
+      true;
+
+    /* =====================================================
+       ESTADO DEL VOLTEO
+       ===================================================== */
+
+    let flipAngle =
+      0;
+
+    let targetFlipAngle =
+      0;
+
+    let isFlipping =
+      false;
+
+    /*
+     * El botón aparece después de que
+     * terminó la revelación inicial.
+     */
+
+    const flipAvailableAt =
+      4.20;
+
+    /* =====================================================
+       FUNCIÓN VOLTEAR
+       ===================================================== */
+
+    function flipCard() {
+
+      if (
+        isFlipping ||
+        !targetVisible
+      ) {
+        return;
+      }
+
+      isFlipping =
+        true;
+
+      flipButton.disabled =
+        true;
+
+      targetFlipAngle +=
+        Math.PI;
+
+      /*
+       * Si va hacia atrás:
+       * "Volver al frente"
+       *
+       * Si vuelve al frente:
+       * "Voltear"
+       */
+
+      const goingToBack =
+        Math.abs(
+          targetFlipAngle
+        ) %
+        (Math.PI * 2) >
+        Math.PI * 0.5;
+
+      flipButton.textContent =
+        goingToBack
+          ? "Volver"
+          : "Voltear";
+    }
+
+    if (flipButton) {
+
+      flipButton.onclick =
+        flipCard;
+    }
+
     /* =====================================================
        TRACKING
        ===================================================== */
@@ -962,6 +1079,36 @@ async function startAR() {
 
         stabilizerReady =
           false;
+
+        /*
+         * Cada vez que se vuelve a detectar
+         * la estampita comenzamos de frente.
+         */
+
+        flipAngle =
+          0;
+
+        targetFlipAngle =
+          0;
+
+        isFlipping =
+          false;
+
+        stabilizedGroup.rotation.y =
+          0;
+
+        if (flipButton) {
+
+          flipButton.classList.add(
+            "hidden"
+          );
+
+          flipButton.disabled =
+            false;
+
+          flipButton.textContent =
+            "Voltear";
+        }
 
         revealWave
           .material
@@ -1010,6 +1157,31 @@ async function startAR() {
 
         stabilizedGroup.visible =
           false;
+
+        flipAngle =
+          0;
+
+        targetFlipAngle =
+          0;
+
+        isFlipping =
+          false;
+
+        stabilizedGroup.rotation.y =
+          0;
+
+        if (flipButton) {
+
+          flipButton.classList.add(
+            "hidden"
+          );
+
+          flipButton.disabled =
+            false;
+
+          flipButton.textContent =
+            "Voltear";
+        }
 
         Object.values(
           layerMeshes
@@ -1194,6 +1366,77 @@ async function startAR() {
         }
 
         /* =================================================
+           VOLTEO FÍSICO
+           ================================================= */
+
+        if (
+          targetVisible
+        ) {
+
+          const flipSpeed =
+            8;
+
+          const difference =
+            targetFlipAngle -
+            flipAngle;
+
+          flipAngle +=
+            difference *
+            (
+              1 -
+              Math.exp(
+                -flipSpeed *
+                delta
+              )
+            );
+
+          stabilizedGroup.rotation.y =
+            flipAngle;
+
+          if (
+            Math.abs(
+              difference
+            ) <
+            0.002
+          ) {
+
+            flipAngle =
+              targetFlipAngle;
+
+            stabilizedGroup.rotation.y =
+              flipAngle;
+
+            isFlipping =
+              false;
+
+            if (flipButton) {
+
+              flipButton.disabled =
+                false;
+            }
+          }
+        }
+
+        /* =================================================
+           BOTÓN
+           ================================================= */
+
+        if (
+          targetVisible &&
+          elapsed >=
+          flipAvailableAt &&
+          !isFlipping
+        ) {
+
+          if (flipButton) {
+
+            flipButton.classList.remove(
+              "hidden"
+            );
+          }
+        }
+
+        /* =================================================
            REVELACIÓN ORGÁNICA
            ================================================= */
 
@@ -1203,10 +1446,6 @@ async function startAR() {
 
           const revealStart =
             0.45;
-
-          /*
-           * Un poco más lenta que antes.
-           */
 
           const revealDuration =
             3.50;
@@ -1237,11 +1476,6 @@ async function startAR() {
               smooth(p) *
               1.16;
           }
-
-          /*
-           * Aplicar el mismo avance
-           * a todas las capas.
-           */
 
           Object.values(
             layerMeshes
@@ -1799,23 +2033,12 @@ async function startAR() {
             }
           }
 
-          /*
-           * Primero:
-           * MI PRIMERA COMUNIÓN
-           */
-
           textSweep(
             glowMeshes[
               "texto-comunion.png"
             ],
             2.05
           );
-
-          /*
-           * Después:
-           * QUE JESÚS SIEMPRE
-           * CAMINE A MI LADO
-           */
 
           textSweep(
             glowMeshes[
@@ -1864,6 +2087,13 @@ async function startAR() {
 
     startButton.textContent =
       "Intentar nuevamente";
+
+    if (flipButton) {
+
+      flipButton.classList.add(
+        "hidden"
+      );
+    }
 
     status.textContent =
       "No se pudo iniciar la cámara.";
@@ -1915,6 +2145,19 @@ function stopAR() {
 
   startButton.textContent =
     "Comenzar";
+
+  if (flipButton) {
+
+    flipButton.classList.add(
+      "hidden"
+    );
+
+    flipButton.disabled =
+      false;
+
+    flipButton.textContent =
+      "Voltear";
+  }
 
   mindarThree =
     null;
