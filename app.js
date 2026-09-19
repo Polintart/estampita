@@ -815,7 +815,7 @@ async function startAR() {
 
         side: THREE.DoubleSide,
 
-        depthTest: false,
+        depthWrite: false,
 
         depthTest: false,
 
