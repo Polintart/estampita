@@ -800,7 +800,7 @@ async function startAR() {
 
     const backTexture =
       await textureLoader.loadAsync(
-        "./assets/animation/reverso.jpeg"
+        "./assets/animation/reverso.png"
       );
 
     backTexture.colorSpace =
