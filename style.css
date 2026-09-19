@@ -1,127 +1,266 @@
+/* =========================================
+   BASE
+   ========================================= */
+
 *{
-  box-sizing:border-box
+  box-sizing:border-box;
 }
 
-html,body{
+html,
+body{
   margin:0;
   width:100%;
   height:100%;
   overflow:hidden;
+
   background:#f8f4ee;
-  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
+
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
-#app,#ar-container{
+body{
+  overscroll-behavior:none;
+}
+
+#app,
+#ar-container{
   position:fixed;
   inset:0;
+
   width:100%;
   height:100%;
-  overflow:hidden
+
+  overflow:hidden;
 }
 
 canvas{
   display:block;
+
   width:100%;
-  height:100%
+  height:100%;
 }
+
+
+/* =========================================
+   PANTALLAS
+   ========================================= */
 
 .screen{
   position:fixed;
   inset:0;
-  display:grid;
-  place-items:center;
-  padding:24px;
+
+  width:100%;
+  height:100%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
   z-index:10;
-  background:rgba(248,244,238,.96)
+
+  background:#f8f4ee;
+
+  overflow:hidden;
 }
 
 .screen.hidden{
-  display:none
+  display:none;
 }
 
-.card{
-  width:min(430px,92vw);
-  padding:34px 26px 28px;
-  text-align:center;
-  background:#fffdf9;
-  border:1px solid rgba(112,86,135,.18);
-  border-radius:24px;
-  box-shadow:0 18px 60px rgba(64,44,76,.12)
+
+/* =========================================
+   PRESENTACIÓN
+   ========================================= */
+
+.presentation{
+  position:relative;
+
+  width:100%;
+  height:100%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  overflow:hidden;
 }
 
-.sparkle{
-  font-size:34px;
-  color:#8e6ba8;
-  margin-bottom:6px
+
+/* =========================================
+   IMAGEN DE PRESENTACIÓN
+   ========================================= */
+
+.presentation-image{
+  display:block;
+
+  width:100%;
+  height:100%;
+
+  object-fit:contain;
+
+  user-select:none;
+  -webkit-user-select:none;
+
+  -webkit-touch-callout:none;
+
+  pointer-events:none;
 }
 
-h1{
-  margin:0 0 10px;
-  color:#5f476f;
-  font-size:28px;
-  font-weight:600
-}
 
-p{
-  margin:0 auto 24px;
-  max-width:320px;
-  color:#665f68;
-  line-height:1.5
-}
+/* =========================================
+   BOTÓN TRANSPARENTE SOBRE
+   "ABRÍ MI ESTAMPITA"
+   ========================================= */
 
-button{
+.presentation-button{
+  position:absolute;
+
+  /*
+    Estos valores ubican el botón real
+    sobre el botón ilustrado de la imagen.
+
+    Se calculan proporcionalmente para que
+    funcionen en distintas pantallas.
+  */
+
+  left:50%;
+  bottom:8.4%;
+
+  width:min(48%, 330px);
+  height:min(8.5%, 95px);
+
+  transform:translateX(-50%);
+
+  padding:0;
+
   border:0;
   border-radius:999px;
-  background:#76588c;
-  color:white;
-  font-size:17px;
-  padding:14px 30px;
-  box-shadow:0 8px 22px rgba(118,88,140,.22)
+
+  background:transparent;
+
+  cursor:pointer;
+
+  z-index:20;
+
+  -webkit-tap-highlight-color:transparent;
+
+  touch-action:manipulation;
 }
 
-button:active{
-  transform:scale(.98)
+
+/*
+  Pequeño efecto al tocar.
+  No cambia visualmente la ilustración,
+  solamente da respuesta táctil.
+*/
+
+.presentation-button:active{
+  transform:translateX(-50%) scale(.97);
 }
 
-small{
-  display:block;
-  margin-top:16px;
-  color:#8a838d;
-  font-size:12px;
-  line-height:1.45
+
+/* =========================================
+   TEXTO ACCESIBLE OCULTO
+   ========================================= */
+
+.sr-only{
+  position:absolute;
+
+  width:1px;
+  height:1px;
+
+  padding:0;
+  margin:-1px;
+
+  overflow:hidden;
+
+  clip:rect(0,0,0,0);
+
+  white-space:nowrap;
+
+  border:0;
 }
+
+
+/* =========================================
+   ESTADO DE LA CÁMARA
+   ========================================= */
 
 .status{
   position:fixed;
+
   left:50%;
   bottom:28px;
+
   transform:translateX(-50%);
+
   z-index:5;
+
   padding:10px 16px;
+
   border-radius:999px;
+
   background:rgba(255,253,249,.9);
+
   color:#65546d;
+
   font-size:14px;
-  box-shadow:0 6px 24px rgba(50,40,60,.12);
-  white-space:nowrap
+
+  box-shadow:
+    0 6px 24px rgba(50,40,60,.12);
+
+  white-space:nowrap;
 }
 
-.status.hidden,.stop.hidden{
-  display:none
+.status.hidden{
+  display:none;
 }
+
+
+/* =========================================
+   BOTÓN CERRAR CÁMARA
+   ========================================= */
 
 .stop{
   position:fixed;
+
   right:18px;
-  top:calc(env(safe-area-inset-top) + 18px);
+
+  top:
+    calc(
+      env(safe-area-inset-top) + 18px
+    );
+
   z-index:20;
+
   width:42px;
   height:42px;
+
   padding:0;
+
+  border:0;
+  border-radius:50%;
+
   background:rgba(255,253,249,.9);
+
   color:#6a596f;
+
   font-size:28px;
-  line-height:42px
+  line-height:42px;
+
+  box-shadow:
+    0 6px 20px rgba(50,40,60,.12);
+
+  -webkit-tap-highlight-color:transparent;
+}
+
+.stop.hidden{
+  display:none;
 }
 
 
@@ -131,9 +270,12 @@ small{
 
 #flip-button{
   position:absolute;
+
   top:50%;
   right:18px;
+
   transform:translateY(-50%);
+
   z-index:1000;
 
   border:none;
@@ -145,31 +287,100 @@ small{
   color:#fff;
 
   font-family:inherit;
+
   font-size:14px;
   font-weight:600;
 
-  box-shadow:0 6px 18px rgba(64,44,76,.20);
+  box-shadow:
+    0 6px 18px rgba(64,44,76,.20);
 
   cursor:pointer;
 
   transition:
     transform 0.2s ease,
     opacity 0.2s ease;
+
+  -webkit-tap-highlight-color:transparent;
+
+  touch-action:manipulation;
 }
 
 #flip-button:hover{
-  transform:translateY(-50%) scale(1.04)
+  transform:
+    translateY(-50%)
+    scale(1.04);
 }
 
 #flip-button:active{
-  transform:translateY(-50%) scale(.96)
+  transform:
+    translateY(-50%)
+    scale(.96);
 }
 
 #flip-button.hidden{
-  display:none
+  display:none;
 }
 
 #flip-button:disabled{
   opacity:.55;
-  cursor:default
+  cursor:default;
+}
+
+
+/* =========================================
+   AJUSTES PARA PANTALLAS MUY ALTAS
+   ========================================= */
+
+@media (min-aspect-ratio: 2/3){
+
+  .presentation-image{
+    height:100%;
+    width:auto;
+    max-width:100%;
+  }
+
+}
+
+
+/* =========================================
+   AJUSTES PARA PANTALLAS MUY ANCHAS
+   ========================================= */
+
+@media (max-aspect-ratio: 2/3){
+
+  .presentation-image{
+    width:100%;
+    height:auto;
+    max-height:100%;
+  }
+
+}
+
+
+/* =========================================
+   TABLETS
+   ========================================= */
+
+@media (min-width:700px){
+
+  .presentation-button{
+    width:min(42%, 360px);
+    height:min(9%, 105px);
+
+    bottom:8.2%;
+  }
+
+}
+
+
+/* =========================================
+   REDUCCIÓN DE MOVIMIENTO
+   ========================================= */
+
+@media (prefers-reduced-motion:reduce){
+
+  .presentation-button{
+    transition:none;
+  }
+
 }
