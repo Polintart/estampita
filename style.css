@@ -388,6 +388,6 @@ canvas{
 /* Ajuste fino del botón de presentación en iPhone */
 @media (max-width:699px) and (max-aspect-ratio:2/3){
   .presentation-button{
-    bottom:calc(8.4% + 1cm);
+    bottom:calc(8.4% + 2cm);
   }
 }
