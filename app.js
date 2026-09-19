@@ -813,11 +813,11 @@ async function startAR() {
 
         transparent: false,
 
-        side: THREE.DoubleSide,
-
         depthWrite: false,
 
         depthTest: false,
+
+        side: THREE.FrontSide,
 
       });
 
