@@ -811,13 +811,14 @@ async function startAR() {
 
         map: backTexture,
 
-        transparent: true,
+        transparent: false,
+
+        side: THREE.DoubleSide,
 
         depthTest: false,
 
-        depthWrite: false,
+        depthTest: false,
 
-        side: THREE.FrontSide
       });
 
     const backMesh =
